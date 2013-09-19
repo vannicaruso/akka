@@ -135,6 +135,7 @@ case class ClusterRouterSettings private[akka] (
   if (isRouteesPathDefined && maxInstancesPerNode != 1)
     throw new IllegalArgumentException("maxInstancesPerNode of cluster router must be 1 when routeesPath is defined")
 
+  // FIXME #3549 remove
   val routeesPathElements: immutable.Iterable[String] = routeesPath match {
     case RelativeActorPath(elements) ⇒ elements
     case _ ⇒
@@ -161,9 +162,8 @@ private[akka] class ClusterRouteeProvider(
   // need this counter as instance variable since Resizer may call createRoutees several times
   private val childNameCounter = new AtomicInteger
 
-  override def registerRouteesFor(paths: immutable.Iterable[String]): Unit =
-    throw new ConfigurationException("Cluster deployment can not be combined with routees for [%s]"
-      format context.self.path.toString)
+  // not used
+  override def registerRouteesFor(paths: immutable.Iterable[String]): Unit = ()
 
   /**
    * Note that nrOfInstances is ignored for cluster routers, instead
