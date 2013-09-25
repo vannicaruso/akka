@@ -20,6 +20,7 @@ import akka.actor.SupervisorStrategy
 import akka.routing2.Resizer
 import akka.routing.RouterConfig
 import akka.routing2.Pool
+import akka.actor.ActorSystem
 
 /**
  * [[akka.routing.RouterConfig]] implementation for remote deployment on defined
@@ -37,7 +38,7 @@ final case class RemoteRouterConfig(local: Pool, nodes: Iterable[Address]) exten
   // need this counter as instance variable since Resizer may call createRoutees several times
   private val childNameCounter = new AtomicInteger
 
-  override def createRouter(): Router = local.createRouter()
+  override def createRouter(system: ActorSystem): Router = local.createRouter(system)
 
   override def nrOfInstances: Int = local.nrOfInstances
 

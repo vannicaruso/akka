@@ -79,7 +79,7 @@ class RemoteRoundRobinSpec extends MultiNodeSpec(RemoteRoundRobinMultiJvmSpec)
   with STMultiNodeSpec with ImplicitSender with DefaultTimeout {
   import RemoteRoundRobinMultiJvmSpec._
 
-  def initialParticipants = 4
+  def initialParticipants = roles.size
 
   "A remote round robin pool" must {
     "be locally instantiated on a remote node and be able to communicate through its RemoteActorRef" taggedAs LongRunningTest in {

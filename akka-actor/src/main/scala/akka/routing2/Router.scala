@@ -6,6 +6,7 @@ package akka.routing2
 import scala.collection.immutable
 import akka.actor.ActorRef
 import akka.actor.ActorSelection
+import akka.routing.RouterEnvelope
 
 trait RoutingLogic {
   def select(message: Any, routees: immutable.IndexedSeq[Routee]): Routee
@@ -46,8 +47,13 @@ final case class Router(val logic: RoutingLogic, val routees: immutable.IndexedS
   def route(message: Any, sender: ActorRef): Unit =
     message match {
       case akka.routing.Broadcast(msg) ⇒ SeveralRoutees(routees).send(msg, sender)
-      case msg                         ⇒ logic.select(msg, routees).send(msg, sender)
+      case msg                         ⇒ logic.select(msg, routees).send(unwrap(msg), sender)
     }
+
+  private def unwrap(msg: Any): Any = msg match {
+    case env: RouterEnvelope ⇒ env.message
+    case _                   ⇒ msg
+  }
 
   def withRoutees(rs: immutable.IndexedSeq[Routee]): Router = copy(routees = rs)
 

@@ -34,6 +34,10 @@ import akka.actor.RootActorPath
 import akka.cluster.MemberStatus
 import akka.routing2.ActorSelectionRoutee
 import akka.actor.ActorInitializationException
+import akka.routing2.RouterPoolActor
+import akka.actor.ActorSystem
+import akka.actor.ActorSystem
+import akka.routing2.RoutingLogic
 
 /**
  * [[akka.routing.RouterConfig]] implementation for deployment on cluster nodes.
@@ -47,6 +51,8 @@ final case class ClusterNozzle(local: Nozzle, settings: ClusterRouterSettings) e
   require(settings.routeesPath.nonEmpty, "routeesPath must be defined")
 
   override def paths: immutable.Iterable[String] = Nil
+
+  override def createActor(): Actor = new ClusterNozzleActor(settings)
 
   override def withFallback(other: RouterConfig): RouterConfig = other match {
     case ClusterNozzle(_: ClusterNozzle, _) ⇒ throw new IllegalStateException(
@@ -89,6 +95,8 @@ final case class ClusterPool(local: Pool, settings: ClusterRouterSettings) exten
 
   override def resizer2: Option[Resizer] = local.resizer2
 
+  override def createActor(): Actor = new ClusterPoolActor(local.supervisorStrategy, settings)
+
   override def withFallback(other: RouterConfig): RouterConfig = other match {
     case ClusterPool(_: ClusterPool, _) ⇒ throw new IllegalStateException(
       "ClusterPool is not allowed to wrap a ClusterPool")
@@ -107,11 +115,12 @@ final case class ClusterPool(local: Pool, settings: ClusterRouterSettings) exten
 private[akka] trait ClusterRouterConfig extends RouterConfig2 {
   def local: RouterConfig2
   def settings: ClusterRouterSettings
-  override def createRouter(): Router = local.createRouter()
-  override def createActor(): Actor = new ClusterRouterActor(local.supervisorStrategy, settings)
+  override def createRouter(system: ActorSystem): Router = local.createRouter(system)
   override def supervisorStrategy: SupervisorStrategy = local.supervisorStrategy
   override def routerDispatcher: String = local.routerDispatcher
   override def stopRouterWhenAllRouteesRemoved: Boolean = false
+  override def routingLogicController(routingLogic: RoutingLogic): Option[Props] =
+    local.routingLogicController(routingLogic)
 
   // Intercept ClusterDomainEvent and route them to the ClusterRouterActor
   override def isManagementMessage(msg: Any): Boolean =
@@ -120,12 +129,80 @@ private[akka] trait ClusterRouterConfig extends RouterConfig2 {
 
 /**
  * INTERNAL API
+ */
+private[akka] class ClusterPoolActor(
+  supervisorStrategy: SupervisorStrategy, val settings: ClusterRouterSettings)
+  extends RouterPoolActor(supervisorStrategy) with ClusterRouterActor {
+
+  override def receive = clusterReceive orElse super.receive
+
+  /**
+   * Adds routees based on totalInstances and maxInstancesPerNode settings
+   */
+  def addRoutees(): Unit = {
+    @tailrec
+    def doAddRoutees(): Unit = selectDeploymentTarget match {
+      case None ⇒ // done
+      case Some(target) ⇒
+        val routeeProps = cell.routeeProps
+        val deploy = Deploy(config = ConfigFactory.empty(), routerConfig = routeeProps.routerConfig,
+          scope = RemoteScope(target))
+        val routee = pool.newRoutee(routeeProps.withDeploy(deploy), context)
+        // must register each one, since registered routees are used in selectDeploymentTarget
+        cell.addRoutee(routee)
+
+        // recursion until all created
+        doAddRoutees()
+    }
+
+    doAddRoutees()
+  }
+
+}
+
+/**
+ * INTERNAL API
+ */
+private[akka] class ClusterNozzleActor(val settings: ClusterRouterSettings)
+  extends RouterActor with ClusterRouterActor {
+
+  val nozzle = cell.routerConfig match {
+    case x: Nozzle ⇒ x
+    case other ⇒
+      throw ActorInitializationException("ClusterNozzleActor can only be used with Nozle, not " + other.getClass)
+  }
+
+  override def receive = clusterReceive orElse super.receive
+
+  /**
+   * Adds routees based on totalInstances and maxInstancesPerNode settings
+   */
+  def addRoutees(): Unit = {
+    @tailrec
+    def doAddRoutees(): Unit = selectDeploymentTarget match {
+      case None ⇒ // done
+      case Some(target) ⇒
+        val routee = nozzle.routeeFor(target + settings.routeesPath, context)
+        // must register each one, since registered routees are used in selectDeploymentTarget
+        cell.addRoutee(routee)
+
+        // recursion until all created
+        doAddRoutees()
+    }
+
+    doAddRoutees()
+  }
+
+}
+
+/**
+ * INTERNAL API
  * The router actor, subscribes to cluster events and
  * adjusts the routees.
  */
-private[akka] class ClusterRouterActor(
-  supervisorStrategy: SupervisorStrategy, settings: ClusterRouterSettings)
-  extends RouterActor(supervisorStrategy) {
+private[akka] trait ClusterRouterActor { this: RouterActor ⇒
+
+  def settings: ClusterRouterSettings
 
   if (!cell.routerConfig.isInstanceOf[Pool] && !cell.routerConfig.isInstanceOf[Nozzle])
     throw ActorInitializationException("Cluster router actor can only be used with Pool or Nozzle, not with " +
@@ -172,8 +249,8 @@ private[akka] class ClusterRouterActor(
    */
   def fullAddress(routee: Routee): Address = {
     val a = routee match {
-      case ActorRefRoutee(ref)             ⇒ ref.path.address
-      case ActorSelectionRoutee(selection) ⇒ selection.anchor.path.address
+      case ActorRefRoutee(ref)       ⇒ ref.path.address
+      case ActorSelectionRoutee(sel) ⇒ sel.anchor.path.address
     }
     a match {
       case Address(_, _, None, None) ⇒ cluster.selfAddress
@@ -184,31 +261,9 @@ private[akka] class ClusterRouterActor(
   /**
    * Adds routees based on totalInstances and maxInstancesPerNode settings
    */
-  def addRoutees(): Unit = {
-    @tailrec
-    def doAddRoutees(): Unit = selectDeploymentTarget match {
-      case None ⇒ // done
-      case Some(target) ⇒
-        val routee = cell.routerConfig match {
-          case pool: Pool ⇒
-            val routeeProps = cell.routeeProps
-            val deploy = Deploy(config = ConfigFactory.empty(), routerConfig = routeeProps.routerConfig,
-              scope = RemoteScope(target))
-            pool.newRoutee(routeeProps.withDeploy(deploy), context)
-          case nozzle: Nozzle ⇒
-            nozzle.routeeFor(target + settings.routeesPath, context)
-        }
-        // must register each one, since registered routees are used in selectDeploymentTarget
-        cell.addRoutee(routee)
+  def addRoutees(): Unit
 
-        // recursion until all created
-        doAddRoutees()
-    }
-
-    doAddRoutees()
-  }
-
-  private def selectDeploymentTarget: Option[Address] = {
+  def selectDeploymentTarget: Option[Address] = {
     val currentRoutees = cell.router.routees
     val currentNodes = availableNodes
     if (currentNodes.isEmpty || currentRoutees.size >= settings.totalInstances) {
@@ -243,8 +298,6 @@ private[akka] class ClusterRouterActor(
     // this is useful when totalInstances < upNodes.size
     addRoutees()
   }
-
-  override def receive = clusterReceive orElse super.receive
 
   def clusterReceive: Receive = {
     case s: CurrentClusterState ⇒

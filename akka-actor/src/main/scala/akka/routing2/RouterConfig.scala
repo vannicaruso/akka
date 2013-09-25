@@ -17,6 +17,7 @@ import akka.dispatch.Dispatchers
 import akka.routing.Route
 import akka.routing.RouteeProvider
 import akka.routing.RouterConfig
+import akka.actor.ActorSystem
 
 object RouterConfig2 {
   val defaultSupervisorStrategy: SupervisorStrategy = OneForOneStrategy() {
@@ -47,14 +48,26 @@ trait RouterConfig2 extends RouterConfig {
 
   /**
    * Create the actual router, responsible for routing messages to routees.
+   * @param system the ActorSystem this router belongs to
    */
-  def createRouter(): Router
+  def createRouter(system: ActorSystem): Router
 
   // FIXME #3549 change signature to `createRouterActor: RouterActor`
   /**
    * The router "head" actor.
    */
-  override def createActor(): Actor = new RouterActor(RouterConfig2.this.supervisorStrategy)
+  override def createActor(): Actor
+
+  // FIXME #3549 try to make more things INTERNAL API
+
+  /**
+   * Possibility to define an actor for controlling the routing
+   * logic from external stimuli (e.g. monitoring metrics).
+   * This actor will be a child of the router "head" actor.
+   * Managment messages not handled by the "head" actor are
+   * delegated to this controller actor.
+   */
+  def routingLogicController(routingLogic: RoutingLogic): Option[Props] = None
 
   /**
    * Is the message handled by the router head actor
@@ -81,27 +94,11 @@ trait RouterConfig2 extends RouterConfig {
   override def verifyConfig(path: ActorPath): Unit = ()
 
   // FIXME #3549 remove these 
+  override def supervisorStrategy: SupervisorStrategy = ???
   override def createRoute(routeeProvider: RouteeProvider): Route = ???
   override def createRouteeProvider(context: ActorContext, routeeProps: Props): RouteeProvider = ???
   override def resizer: Option[akka.routing.Resizer] = ???
 
-}
-
-/**
- * INTERNAL API
- *
- * Used to override unset configuration in a router.
- */
-private[akka] trait NozzleOverrideUnsetConfig[T <: Nozzle] extends Nozzle {
-
-  final def overrideUnsetConfig(other: RouterConfig): RouterConfig =
-    if (other == NoRouter) this // NoRouter is the default, hence “neutral”
-    else if ((this.supervisorStrategy eq RouterConfig2.defaultSupervisorStrategy)
-      && (other.supervisorStrategy ne RouterConfig2.defaultSupervisorStrategy))
-      this.withSupervisorStrategy(other.supervisorStrategy).asInstanceOf[NozzleOverrideUnsetConfig[T]]
-    else this
-
-  def withSupervisorStrategy(strategy: SupervisorStrategy): T
 }
 
 /**
@@ -141,6 +138,8 @@ trait Nozzle extends RouterConfig2 {
    */
   private[akka] def routeeFor(path: String, context: ActorContext): Routee =
     ActorSelectionRoutee(context.actorSelection(path))
+
+  override def createActor(): Actor = new RouterActor
 }
 
 trait Pool extends RouterConfig2 {
@@ -164,6 +163,11 @@ trait Pool extends RouterConfig2 {
    */
   def resizer2: Option[Resizer]
 
+  /**
+   * SupervisorStrategy for the head actor, i.e. for supervising the routees of the pool.
+   */
+  override def supervisorStrategy: SupervisorStrategy
+
   /*
    * Specify that this router should stop itself when all routees have terminated (been removed).
    * By Default it is `true`, unless a `resizer` is used.
@@ -172,10 +176,10 @@ trait Pool extends RouterConfig2 {
 
   override def createActor(): Actor =
     resizer2 match {
-      case Some(r) ⇒
-        new ResizablePoolActor(supervisorStrategy)
-      case _ ⇒ super.createActor()
+      case None    ⇒ new RouterPoolActor(supervisorStrategy)
+      case Some(r) ⇒ new ResizablePoolActor(supervisorStrategy)
     }
+
 }
 
 /**
@@ -203,7 +207,7 @@ class FromConfig(override val routerDispatcher: String = Dispatchers.DefaultDisp
 
   def this() = this(Dispatchers.DefaultDispatcherId, RouterConfig2.defaultSupervisorStrategy)
 
-  override def createRouter(): Router =
+  override def createRouter(system: ActorSystem): Router =
     throw new UnsupportedOperationException("FromConfig must not create Router")
 
   override def verifyConfig(path: ActorPath): Unit =
@@ -225,7 +229,7 @@ class FromConfig(override val routerDispatcher: String = Dispatchers.DefaultDisp
 @SerialVersionUID(1L)
 abstract class NoRouter extends RouterConfig2
 case object NoRouter extends NoRouter {
-  override def createRouter(): Router = throw new UnsupportedOperationException("NoRouter has no Router")
+  override def createRouter(system: ActorSystem): Router = throw new UnsupportedOperationException("NoRouter has no Router")
   override def routerDispatcher: String = throw new UnsupportedOperationException("NoRouter has no dispatcher")
   override def supervisorStrategy = throw new UnsupportedOperationException("NoRouter has no strategy")
   override def withFallback(other: akka.routing.RouterConfig): akka.routing.RouterConfig = other

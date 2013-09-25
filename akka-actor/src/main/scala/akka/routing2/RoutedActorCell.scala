@@ -20,6 +20,7 @@ import akka.routing.RouterConfig
 import akka.actor.ActorContext
 import akka.actor.PoisonPill
 import akka.actor.SupervisorStrategy
+import akka.actor.ActorRef
 
 /**
  * INTERNAL API
@@ -90,7 +91,7 @@ private[akka] class RoutedActorCell(
 
   override def start(): this.type = {
     // create the initial routees before scheduling the Router actor
-    _router = routerConfig.createRouter()
+    _router = routerConfig.createRouter(system)
     routerConfig match {
       case pool: Pool ⇒
         if (pool.nrOfInstances > 0)
@@ -133,7 +134,7 @@ private[akka] class RoutedActorCell(
 /**
  * INTERNAL API
  */
-private[akka] class RouterActor(override val supervisorStrategy: SupervisorStrategy) extends Actor {
+private[akka] class RouterActor extends Actor {
 
   val cell = context match {
     case x: RoutedActorCell ⇒ x
@@ -141,10 +142,10 @@ private[akka] class RouterActor(override val supervisorStrategy: SupervisorStrat
       throw ActorInitializationException("Router actor can only be used in RoutedActorRef, not in " + context.getClass)
   }
 
+  val routingLogicController: Option[ActorRef] = cell.routerConfig.routingLogicController(
+    cell.router.logic).map(props ⇒ context.actorOf(props, "routingLogicController"))
+
   def receive = {
-    case Terminated(child) ⇒
-      cell.removeRoutee(ActorRefRoutee(child), stopChild = false)
-      stopIfAllRouteesRemoved()
     case CurrentRoutees ⇒
       sender ! RouterRoutees(cell.router.routees)
     case AddRoutee(routee) ⇒
@@ -152,16 +153,8 @@ private[akka] class RouterActor(override val supervisorStrategy: SupervisorStrat
     case RemoveRoutee(routee) ⇒
       cell.removeRoutee(routee, stopChild = true)
       stopIfAllRouteesRemoved()
-    case AdjustPoolSize(change: Int) if cell.routerConfig.isInstanceOf[Pool] ⇒
-      val pool = cell.routerConfig.asInstanceOf[Pool] // FIXME #3549 should we have a separate Pool actor?
-      if (change > 0) {
-        val newRoutees = Vector.fill(change)(pool.newRoutee(cell.routeeProps, context))
-        cell.addRoutees(newRoutees)
-      } else if (change < 0) {
-        val currentRoutees = cell.router.routees
-        val abandon = currentRoutees.drop(currentRoutees.length + change)
-        cell.removeRoutees(abandon, stopChild = true)
-      }
+    case other if routingLogicController.isDefined ⇒
+      routingLogicController.foreach(_.forward(other))
   }
 
   def stopIfAllRouteesRemoved(): Unit =
@@ -171,5 +164,33 @@ private[akka] class RouterActor(override val supervisorStrategy: SupervisorStrat
   override def preRestart(cause: Throwable, msg: Option[Any]): Unit = {
     // do not scrap children
   }
+}
+
+/**
+ * INTERNAL API
+ */
+private[akka] class RouterPoolActor(override val supervisorStrategy: SupervisorStrategy) extends RouterActor {
+
+  val pool = cell.routerConfig match {
+    case x: Pool ⇒ x
+    case other ⇒
+      throw ActorInitializationException("RouterPoolActor can only be used with Pool, not " + other.getClass)
+  }
+
+  override def receive = ({
+    case Terminated(child) ⇒
+      cell.removeRoutee(ActorRefRoutee(child), stopChild = false)
+      stopIfAllRouteesRemoved()
+    case AdjustPoolSize(change: Int) ⇒
+      if (change > 0) {
+        val newRoutees = Vector.fill(change)(pool.newRoutee(cell.routeeProps, context))
+        cell.addRoutees(newRoutees)
+      } else if (change < 0) {
+        val currentRoutees = cell.router.routees
+        val abandon = currentRoutees.drop(currentRoutees.length + change)
+        cell.removeRoutees(abandon, stopChild = true)
+      }
+  }: Actor.Receive) orElse super.receive
+
 }
 

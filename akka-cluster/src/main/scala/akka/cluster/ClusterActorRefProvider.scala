@@ -91,7 +91,8 @@ private[akka] class ClusterDeployer(_settings: ActorSystem.Settings, _pm: Dynami
 
     // FIXME #3549 horrible hack to make it select Nozzle even though routees.paths is not defined (backwards compatibility)
     val config2 =
-      if (config.hasPath("cluster.routees-path")) config.withFallback(ConfigFactory.parseString("routees.paths=[dummy]"))
+      if (config.hasPath("cluster.routees-path") && config.hasPath("routing2") && config.getBoolean("routing2"))
+        config.withFallback(ConfigFactory.parseString("routees.paths=[dummy]"))
       else config
 
     super.parseConfig(path, config2) match {
@@ -127,35 +128,40 @@ private[akka] class ClusterDeployer(_settings: ActorSystem.Settings, _pm: Dynami
     }
   }
 
-  override protected def createRouterConfig(routerType: String, key: String, config: Config, deployment: Config): RouterConfig = {
-    val routees = immutableSeq(deployment.getStringList("routees.paths"))
-    val nrOfInstances = deployment.getInt("nr-of-instances")
-    val resizer = if (config.hasPath("resizer")) Some(DefaultResizer(deployment.getConfig("resizer"))) else None
+  // FIXME #3549 remove
+  override protected def createRouterConfig(routerType: String, key: String, config: Config, deployment: Config): RouterConfig =
+    if (deployment.getBoolean("routing2"))
+      super.createRouterConfig(routerType, key, config, deployment)
+    else {
 
-    routerType match {
-      case "adaptive" ⇒
-        val metricsSelector = deployment.getString("metrics-selector") match {
-          case "mix"  ⇒ MixMetricsSelector
-          case "heap" ⇒ HeapMetricsSelector
-          case "cpu"  ⇒ CpuMetricsSelector
-          case "load" ⇒ SystemLoadAverageMetricsSelector
-          case fqn ⇒
-            val args = List(classOf[Config] -> deployment)
-            dynamicAccess.createInstanceFor[MetricsSelector](fqn, args).recover({
-              case exception ⇒ throw new IllegalArgumentException(
-                ("Cannot instantiate metrics-selector [%s], defined in [%s], " +
-                  "make sure it extends [akka.cluster.routing.MetricsSelector] and " +
-                  "has constructor with [com.typesafe.config.Config] parameter")
-                  .format(fqn, key), exception)
-            }).get
-        }
+      val routees = immutableSeq(deployment.getStringList("routees.paths"))
+      val nrOfInstances = deployment.getInt("nr-of-instances")
+      val resizer = if (config.hasPath("resizer")) Some(DefaultResizer(deployment.getConfig("resizer"))) else None
 
-        AdaptiveLoadBalancingRouter(metricsSelector, nrOfInstances, routees, resizer)
+      routerType match {
+        case "adaptive" ⇒
+          val metricsSelector = deployment.getString("metrics-selector") match {
+            case "mix"  ⇒ MixMetricsSelector
+            case "heap" ⇒ HeapMetricsSelector
+            case "cpu"  ⇒ CpuMetricsSelector
+            case "load" ⇒ SystemLoadAverageMetricsSelector
+            case fqn ⇒
+              val args = List(classOf[Config] -> deployment)
+              dynamicAccess.createInstanceFor[MetricsSelector](fqn, args).recover({
+                case exception ⇒ throw new IllegalArgumentException(
+                  ("Cannot instantiate metrics-selector [%s], defined in [%s], " +
+                    "make sure it extends [akka.cluster.routing.MetricsSelector] and " +
+                    "has constructor with [com.typesafe.config.Config] parameter")
+                    .format(fqn, key), exception)
+              }).get
+          }
 
-      case _ ⇒ super.createRouterConfig(routerType, key, config, deployment)
+          AdaptiveLoadBalancingRouter(metricsSelector, nrOfInstances, routees, resizer)
+
+        case _ ⇒ super.createRouterConfig(routerType, key, config, deployment)
+      }
+
     }
-
-  }
 }
 
 @SerialVersionUID(1L)

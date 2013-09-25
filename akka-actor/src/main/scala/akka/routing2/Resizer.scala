@@ -330,7 +330,7 @@ private[akka] object ResizablePoolActor {
  * INTERNAL API
  */
 private[akka] class ResizablePoolActor(supervisorStrategy: SupervisorStrategy)
-  extends RouterActor(supervisorStrategy) {
+  extends RouterPoolActor(supervisorStrategy) {
   import ResizablePoolActor._
 
   val resizerCell = context match {

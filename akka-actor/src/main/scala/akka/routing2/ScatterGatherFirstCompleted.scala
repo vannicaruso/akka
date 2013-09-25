@@ -20,13 +20,16 @@ import scala.concurrent.duration.FiniteDuration
 import scala.concurrent.duration._
 import akka.util.Timeout
 import java.util.concurrent.TimeUnit
+import akka.actor.ActorSystem
 
-object ScatterGatherFirstCompletedRoutingLogic {
-  def apply(within: FiniteDuration): ScatterGatherFirstCompletedRoutingLogic =
-    new ScatterGatherFirstCompletedRoutingLogic(within)
-}
-
-class ScatterGatherFirstCompletedRoutingLogic(within: FiniteDuration) extends RoutingLogic {
+/**
+ * Broadcasts the message to all routees, and replies with the first response.
+ *
+ * @param within expecting at least one reply within this duration, otherwise
+ *   it will reply with [[akka.pattern.AskTimeoutException]] in a [[akka.actor.Status.Failure]]
+ */
+@SerialVersionUID(1L)
+final case class ScatterGatherFirstCompletedRoutingLogic(within: FiniteDuration) extends RoutingLogic {
   override def select(message: Any, routees: immutable.IndexedSeq[Routee]): Routee =
     if (routees.isEmpty) NoRoutee
     else ScatterGatherFirstCompletedRoutees(routees, within)
@@ -35,6 +38,7 @@ class ScatterGatherFirstCompletedRoutingLogic(within: FiniteDuration) extends Ro
 /**
  * INTERNAL API
  */
+@SerialVersionUID(1L)
 private[akka] case class ScatterGatherFirstCompletedRoutees(
   routees: immutable.IndexedSeq[Routee], within: FiniteDuration) extends Routee {
 
@@ -55,6 +59,40 @@ private[akka] case class ScatterGatherFirstCompletedRoutees(
   }
 }
 
+/**
+ * A router pool that broadcasts the message to all routees, and replies with the first response.
+ *
+ * The configuration parameter trumps the constructor arguments. This means that
+ * if you provide `nrOfInstances` during instantiation they will be ignored if
+ * the router is defined in the configuration file for the actor being used.
+ *
+ * <h1>Supervision Setup</h1>
+ *
+ * Any routees that are created by a router will be created as the router's children.
+ * The router is therefore also the children's supervisor.
+ *
+ * The supervision strategy of the router actor can be configured with
+ * [[#withSupervisorStrategy]]. If no strategy is provided, routers default to
+ * a strategy of “always escalate”. This means that errors are passed up to the
+ * router's supervisor for handling.
+ *
+ * The router's supervisor will treat the error as an error with the router itself.
+ * Therefore a directive to stop or restart will cause the router itself to stop or
+ * restart. The router, in turn, will cause its children to stop and restart.
+ *
+ * @param nrOfInstances initial number of routees in the pool
+ *
+ * @param resizer optional resizer that dynamically adjust the pool size
+ *
+ * @param within expecting at least one reply within this duration, otherwise
+ *   it will reply with [[akka.pattern.AskTimeoutException]] in a [[akka.actor.Status.Failure]]
+ *
+ * @param supervisorStrategy strategy for supervising the routees, see 'Supervision Setup'
+ *
+ * @param routerDispatcher dispatcher to use for the router head actor, which handles
+ *   supervision, death watch and router management messages
+ */
+@SerialVersionUID(1L)
 final case class ScatterGatherFirstCompletedPool(
   override val nrOfInstances: Int, override val resizer2: Option[Resizer] = None,
   within: FiniteDuration,
@@ -68,7 +106,15 @@ final case class ScatterGatherFirstCompletedPool(
       within = Duration(config.getMilliseconds("within"), TimeUnit.MILLISECONDS),
       resizer2 = DefaultResizer.fromConfig(config))
 
-  override def createRouter(): Router = new Router(ScatterGatherFirstCompletedRoutingLogic(within))
+  /**
+   * Java API
+   * @param nr initial number of routees in the pool
+   * @param within expecting at least one reply within this duration, otherwise
+   *   it will reply with [[akka.pattern.AskTimeoutException]] in a [[akka.actor.Status.Failure]]
+   */
+  def this(nr: Int, within: FiniteDuration) = this(nrOfInstances = nr, within = within)
+
+  override def createRouter(system: ActorSystem): Router = new Router(ScatterGatherFirstCompletedRoutingLogic(within))
 
   /**
    * Setting the supervisor strategy to be used for the “head” Router actor.
@@ -79,26 +125,12 @@ final case class ScatterGatherFirstCompletedPool(
    * Setting the resizer to be used.
    */
   def withResizer(resizer: Resizer): ScatterGatherFirstCompletedPool = copy(resizer2 = Some(resizer))
-}
-
-final case class ScatterGatherFirstCompletedNozzle(
-  paths: immutable.Iterable[String],
-  within: FiniteDuration,
-  override val supervisorStrategy: SupervisorStrategy = RouterConfig2.defaultSupervisorStrategy,
-  override val routerDispatcher: String = Dispatchers.DefaultDispatcherId)
-  extends Nozzle with NozzleOverrideUnsetConfig[ScatterGatherFirstCompletedNozzle] {
-
-  def this(config: Config) =
-    this(
-      paths = immutableSeq(config.getStringList("routees.paths")),
-      within = Duration(config.getMilliseconds("within"), TimeUnit.MILLISECONDS))
-
-  override def createRouter(): Router = new Router(ScatterGatherFirstCompletedRoutingLogic(within))
 
   /**
-   * Setting the supervisor strategy to be used for the “head” Router actor.
+   * Setting the dispatcher to be used for the router head actor,  which handles
+   * supervision, death watch and router management messages.
    */
-  override def withSupervisorStrategy(strategy: SupervisorStrategy): ScatterGatherFirstCompletedNozzle = copy(supervisorStrategy = strategy)
+  def withDispatcher(dispatcherId: String): ScatterGatherFirstCompletedPool = copy(routerDispatcher = dispatcherId)
 
   /**
    * Uses the resizer and/or the supervisor strategy of the given Routerconfig
@@ -106,5 +138,53 @@ final case class ScatterGatherFirstCompletedNozzle(
    * resizer was not defined in config.
    */
   override def withFallback(other: RouterConfig): RouterConfig = this.overrideUnsetConfig(other)
+}
+
+/**
+ * A router nozzle that broadcasts the message to all routees, and replies with the first response.
+ *
+ * The configuration parameter trumps the constructor arguments. This means that
+ * if you provide `paths` during instantiation they will be ignored if
+ * the router is defined in the configuration file for the actor being used.
+ *
+ * @param paths string representation of the actor paths of the routees, messages are
+ *   sent with [[akka.actor.ActorSelection]] to these paths
+ *
+ * @param within expecting at least one reply within this duration, otherwise
+ *   it will reply with [[akka.pattern.AskTimeoutException]] in a [[akka.actor.Status.Failure]]
+ *
+ * @param routerDispatcher dispatcher to use for the router head actor, which handles
+ *   router management messages
+ */
+@SerialVersionUID(1L)
+final case class ScatterGatherFirstCompletedNozzle(
+  paths: immutable.Iterable[String],
+  within: FiniteDuration,
+  override val supervisorStrategy: SupervisorStrategy = RouterConfig2.defaultSupervisorStrategy,
+  override val routerDispatcher: String = Dispatchers.DefaultDispatcherId)
+  extends Nozzle {
+
+  def this(config: Config) =
+    this(
+      paths = immutableSeq(config.getStringList("routees.paths")),
+      within = Duration(config.getMilliseconds("within"), TimeUnit.MILLISECONDS))
+
+  /**
+   * Java API
+   * @param routeePaths string representation of the actor paths of the routees, messages are
+   *   sent with [[akka.actor.ActorSelection]] to these paths
+   * @param within expecting at least one reply within this duration, otherwise
+   *   it will reply with [[akka.pattern.AskTimeoutException]] in a [[akka.actor.Status.Failure]]
+   */
+  def this(routeePaths: java.lang.Iterable[String], within: FiniteDuration) =
+    this(paths = immutableSeq(routeePaths), within = within)
+
+  override def createRouter(system: ActorSystem): Router = new Router(ScatterGatherFirstCompletedRoutingLogic(within))
+
+  /**
+   * Setting the dispatcher to be used for the router head actor, which handles
+   * router management messages
+   */
+  def withDispatcher(dispatcherId: String): ScatterGatherFirstCompletedNozzle = copy(routerDispatcher = dispatcherId)
 
 }

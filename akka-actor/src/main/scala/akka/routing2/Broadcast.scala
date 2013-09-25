@@ -4,7 +4,6 @@
 package akka.routing2
 
 import scala.collection.immutable
-import scala.concurrent.forkjoin.ThreadLocalRandom
 import akka.actor.ActorContext
 import akka.actor.Props
 import akka.dispatch.Dispatchers
@@ -14,22 +13,22 @@ import akka.routing.RouterConfig
 import akka.japi.Util.immutableSeq
 import akka.actor.ActorSystem
 
-object RandomRoutingLogic {
-  def apply(): RandomRoutingLogic = new RandomRoutingLogic
+object BroadcastRoutingLogic {
+  def apply(): BroadcastRoutingLogic = new BroadcastRoutingLogic
 }
 
 /**
- * Randomly selects one of the target connections to send a message to
+ * Broadcasts a message to all its connections.
  */
 @SerialVersionUID(1L)
-final class RandomRoutingLogic extends RoutingLogic {
+final class BroadcastRoutingLogic extends RoutingLogic {
   override def select(message: Any, routees: immutable.IndexedSeq[Routee]): Routee =
     if (routees.isEmpty) NoRoutee
-    else routees(ThreadLocalRandom.current.nextInt(routees.size))
+    else SeveralRoutees(routees)
 }
 
 /**
- * A router pool that randomly selects one of the target connections to send a message to.
+ * A router pool that broadcasts a message to all its connections.
  *
  * The configuration parameter trumps the constructor arguments. This means that
  * if you provide `nrOfInstances` during instantiation they will be ignored if
@@ -59,11 +58,11 @@ final class RandomRoutingLogic extends RoutingLogic {
  *   supervision, death watch and router management messages
  */
 @SerialVersionUID(1L)
-final case class RandomPool(
+final case class BroadcastPool(
   override val nrOfInstances: Int, override val resizer2: Option[Resizer] = None,
   override val supervisorStrategy: SupervisorStrategy = RouterConfig2.defaultSupervisorStrategy,
   override val routerDispatcher: String = Dispatchers.DefaultDispatcherId)
-  extends Pool with PoolOverrideUnsetConfig[RandomPool] {
+  extends Pool with PoolOverrideUnsetConfig[BroadcastPool] {
 
   def this(config: Config) =
     this(
@@ -76,23 +75,23 @@ final case class RandomPool(
    */
   def this(nr: Int) = this(nrOfInstances = nr)
 
-  override def createRouter(system: ActorSystem): Router = new Router(RandomRoutingLogic())
+  override def createRouter(system: ActorSystem): Router = new Router(BroadcastRoutingLogic())
 
   /**
    * Setting the supervisor strategy to be used for the “head” Router actor.
    */
-  def withSupervisorStrategy(strategy: SupervisorStrategy): RandomPool = copy(supervisorStrategy = strategy)
+  def withSupervisorStrategy(strategy: SupervisorStrategy): BroadcastPool = copy(supervisorStrategy = strategy)
 
   /**
    * Setting the resizer to be used.
    */
-  def withResizer(resizer: Resizer): RandomPool = copy(resizer2 = Some(resizer))
+  def withResizer(resizer: Resizer): BroadcastPool = copy(resizer2 = Some(resizer))
 
   /**
    * Setting the dispatcher to be used for the router head actor,  which handles
    * supervision, death watch and router management messages.
    */
-  def withDispatcher(dispatcherId: String): RandomPool = copy(routerDispatcher = dispatcherId)
+  def withDispatcher(dispatcherId: String): BroadcastPool = copy(routerDispatcher = dispatcherId)
 
   /**
    * Uses the resizer and/or the supervisor strategy of the given Routerconfig
@@ -103,7 +102,7 @@ final case class RandomPool(
 }
 
 /**
- * A router nozzle that randomly selects one of the target connections to send a message to.
+ * A router nozzle that broadcasts a message to all its connections.
  *
  * The configuration parameter trumps the constructor arguments. This means that
  * if you provide `paths` during instantiation they will be ignored if
@@ -116,7 +115,7 @@ final case class RandomPool(
  *   router management messages
  */
 @SerialVersionUID(1L)
-final case class RandomNozzle(
+final case class BroadcastNozzle(
   paths: immutable.Iterable[String],
   override val supervisorStrategy: SupervisorStrategy = RouterConfig2.defaultSupervisorStrategy,
   override val routerDispatcher: String = Dispatchers.DefaultDispatcherId)
@@ -132,12 +131,12 @@ final case class RandomNozzle(
    */
   def this(routeePaths: java.lang.Iterable[String]) = this(paths = immutableSeq(routeePaths))
 
-  override def createRouter(system: ActorSystem): Router = new Router(RandomRoutingLogic())
+  override def createRouter(system: ActorSystem): Router = new Router(BroadcastRoutingLogic())
 
   /**
    * Setting the dispatcher to be used for the router head actor, which handles
    * router management messages
    */
-  def withDispatcher(dispatcherId: String): RandomNozzle = copy(routerDispatcher = dispatcherId)
+  def withDispatcher(dispatcherId: String): BroadcastNozzle = copy(routerDispatcher = dispatcherId)
 
 }
