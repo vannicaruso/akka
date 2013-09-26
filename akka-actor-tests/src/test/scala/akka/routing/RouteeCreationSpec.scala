@@ -10,7 +10,10 @@ import akka.actor.Actor
 import akka.actor.ActorRef
 import akka.actor.LocalActorRef
 import scala.concurrent.duration._
+import akka.actor.Identify
+import akka.actor.ActorIdentity
 
+@org.junit.runner.RunWith(classOf[org.scalatest.junit.JUnitRunner])
 class RouteeCreationSpec extends AkkaSpec {
 
   "Creating Routees" must {
@@ -18,13 +21,13 @@ class RouteeCreationSpec extends AkkaSpec {
     "result in visible routees" in {
       val N = 100
       system.actorOf(Props(new Actor {
-        testActor ! system.actorFor(self.path)
+        system.actorSelection(self.path).tell(Identify(self.path), testActor)
         def receive = Actor.emptyBehavior
-      }).withRouter(RoundRobinRouter(N)))
+      }).withRouter(RoundRobinPool(N)))
       for (i ← 1 to N) {
-        expectMsgType[ActorRef] match {
-          case _: LocalActorRef ⇒ // fine
-          case x                ⇒ fail(s"routee $i was a ${x.getClass}")
+        expectMsgType[ActorIdentity] match {
+          case ActorIdentity(_, Some(_)) ⇒ // fine
+          case x                         ⇒ fail(s"routee $i was not found $x")
         }
       }
     }
@@ -36,13 +39,13 @@ class RouteeCreationSpec extends AkkaSpec {
         def receive = {
           case "one" ⇒ testActor forward "two"
         }
-      }).withRouter(RoundRobinRouter(N)))
+      }).withRouter(RoundRobinPool(N)))
       val gotit = receiveWhile(messages = N) {
         case "two" ⇒ lastSender.toString
       }
       expectNoMsg(100.millis)
       if (gotit.size != N) {
-        fail(s"got only ${gotit.size} from \n${gotit mkString "\n"}")
+        fail(s"got only ${gotit.size} from [${gotit mkString ", "}]")
       }
     }
 

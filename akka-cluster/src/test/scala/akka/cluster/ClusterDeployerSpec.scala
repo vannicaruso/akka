@@ -9,6 +9,8 @@ import akka.routing._
 import com.typesafe.config._
 import akka.cluster.routing.ClusterRouterConfig
 import akka.cluster.routing.ClusterRouterSettings
+import akka.cluster.routing.ClusterPool
+import akka.cluster.routing.ClusterNozzle
 
 object ClusterDeployerSpec {
   val deployerConf = ConfigFactory.parseString("""
@@ -45,7 +47,7 @@ class ClusterDeployerSpec extends AkkaSpec(ClusterDeployerSpec.deployerConf) {
 
   "A RemoteDeployer" must {
 
-    "be able to parse 'akka.actor.deployment._' with specified cluster lookup routee settings" in {
+    "be able to parse 'akka.actor.deployment._' with specified cluster pool" in {
       val service = "/user/service1"
       val deployment = system.asInstanceOf[ActorSystemImpl].provider.deployer.lookup(service.split("/").drop(1))
       deployment must not be (None)
@@ -54,14 +56,14 @@ class ClusterDeployerSpec extends AkkaSpec(ClusterDeployerSpec.deployerConf) {
         Deploy(
           service,
           deployment.get.config,
-          ClusterRouterConfig(RoundRobinRouter(20), ClusterRouterSettings(
+          ClusterPool(RoundRobinPool(20), ClusterRouterSettings(
             totalInstances = 20, maxInstancesPerNode = 3, allowLocalRoutees = false, useRole = None)),
           ClusterScope,
           Deploy.NoDispatcherGiven,
           Deploy.NoMailboxGiven)))
     }
 
-    "be able to parse 'akka.actor.deployment._' with specified cluster deploy routee settings" in {
+    "be able to parse 'akka.actor.deployment._' with specified cluster nozzle" in {
       val service = "/user/service2"
       val deployment = system.asInstanceOf[ActorSystemImpl].provider.deployer.lookup(service.split("/").drop(1))
       deployment must not be (None)
@@ -70,11 +72,17 @@ class ClusterDeployerSpec extends AkkaSpec(ClusterDeployerSpec.deployerConf) {
         Deploy(
           service,
           deployment.get.config,
-          ClusterRouterConfig(RoundRobinRouter(20), ClusterRouterSettings(
+          ClusterNozzle(RoundRobinNozzle(List("/user/myservice")), ClusterRouterSettings(
             totalInstances = 20, routeesPath = "/user/myservice", allowLocalRoutees = false, useRole = None)),
           ClusterScope,
           "mydispatcher",
           "mymailbox")))
+    }
+
+    "have correct router mappings" in {
+      val mapping = system.asInstanceOf[ActorSystemImpl].provider.deployer.routerTypeMapping
+      mapping("adaptive-pool") must be(classOf[akka.cluster.routing.AdaptiveLoadBalancingPool].getName)
+      mapping("adaptive-nozzle") must be(classOf[akka.cluster.routing.AdaptiveLoadBalancingNozzle].getName)
     }
 
   }

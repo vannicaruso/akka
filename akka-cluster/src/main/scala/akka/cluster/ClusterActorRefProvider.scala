@@ -22,7 +22,6 @@ import akka.remote.RemoteDeployer
 import akka.remote.routing.RemoteRouterConfig
 import akka.routing.RouterConfig
 import akka.routing.DefaultResizer
-import akka.cluster.routing.ClusterRouterConfig
 import akka.cluster.routing.ClusterRouterSettings
 import akka.cluster.routing.AdaptiveLoadBalancingRouter
 import akka.cluster.routing.MixMetricsSelector
@@ -33,11 +32,12 @@ import akka.cluster.routing.MetricsSelector
 import akka.dispatch.sysmsg.SystemMessage
 import akka.actor.ActorRef
 import akka.actor.Props
-import akka.routing2.Pool
-import akka.routing2.Nozzle
-import akka.cluster.routing2.ClusterPool
-import akka.cluster.routing2.ClusterNozzle
+import akka.routing.Pool
+import akka.routing.Nozzle
+import akka.cluster.routing.ClusterPool
+import akka.cluster.routing.ClusterNozzle
 import com.typesafe.config.ConfigFactory
+import akka.routing.DeprecatedRouterConfig
 
 /**
  * INTERNAL API
@@ -91,8 +91,8 @@ private[akka] class ClusterDeployer(_settings: ActorSystem.Settings, _pm: Dynami
 
     // FIXME #3549 horrible hack to make it select Nozzle even though routees.paths is not defined (backwards compatibility)
     val config2 =
-      if (config.hasPath("cluster.routees-path") && config.hasPath("routing2") && config.getBoolean("routing2"))
-        config.withFallback(ConfigFactory.parseString("routees.paths=[dummy]"))
+      if (config.hasPath("cluster.routees-path"))
+        config.withFallback(ConfigFactory.parseString(s"""routees.paths=["${config.getString("cluster.routees-path")}"]"""))
       else config
 
     super.parseConfig(path, config2) match {
@@ -103,65 +103,26 @@ private[akka] class ClusterDeployer(_settings: ActorSystem.Settings, _pm: Dynami
           if (deploy.routerConfig.isInstanceOf[RemoteRouterConfig])
             throw new ConfigurationException("Cluster deployment can't be combined with [%s]".format(deploy.routerConfig))
 
-          import ClusterRouterSettings.useRoleOption
-          val clusterRouterSettings = ClusterRouterSettings(
-            totalInstances = deploy.config.getInt("nr-of-instances"),
-            maxInstancesPerNode = deploy.config.getInt("cluster.max-nr-of-instances-per-node"),
-            allowLocalRoutees = deploy.config.getBoolean("cluster.allow-local-routees"),
-            routeesPath = deploy.config.getString("cluster.routees-path"),
-            useRole = useRoleOption(deploy.config.getString("cluster.use-role")))
+          val clusterRouterSettings = ClusterRouterSettings.fromConfig(deploy.config)
 
           deploy.routerConfig match {
+            case r: DeprecatedRouterConfig ⇒
+              Some(deploy.copy(
+                routerConfig = ClusterPool(r, clusterRouterSettings), scope = ClusterScope))
             case r: Pool ⇒
               Some(deploy.copy(
                 routerConfig = ClusterPool(r, clusterRouterSettings), scope = ClusterScope))
             case r: Nozzle ⇒
               Some(deploy.copy(
                 routerConfig = ClusterNozzle(r, clusterRouterSettings), scope = ClusterScope))
-            case old ⇒
-              // FIXME #3549 temporary  
-              Some(deploy.copy(
-                routerConfig = ClusterRouterConfig(deploy.routerConfig, clusterRouterSettings), scope = ClusterScope))
+            case other ⇒
+              throw new IllegalArgumentException(s"Cluster aware router can only wrap Pool or Nozzle, got [${other.getClass.getName}]")
           }
         } else d
       case None ⇒ None
     }
   }
 
-  // FIXME #3549 remove
-  override protected def createRouterConfig(routerType: String, key: String, config: Config, deployment: Config): RouterConfig =
-    if (deployment.getBoolean("routing2"))
-      super.createRouterConfig(routerType, key, config, deployment)
-    else {
-
-      val routees = immutableSeq(deployment.getStringList("routees.paths"))
-      val nrOfInstances = deployment.getInt("nr-of-instances")
-      val resizer = if (config.hasPath("resizer")) Some(DefaultResizer(deployment.getConfig("resizer"))) else None
-
-      routerType match {
-        case "adaptive" ⇒
-          val metricsSelector = deployment.getString("metrics-selector") match {
-            case "mix"  ⇒ MixMetricsSelector
-            case "heap" ⇒ HeapMetricsSelector
-            case "cpu"  ⇒ CpuMetricsSelector
-            case "load" ⇒ SystemLoadAverageMetricsSelector
-            case fqn ⇒
-              val args = List(classOf[Config] -> deployment)
-              dynamicAccess.createInstanceFor[MetricsSelector](fqn, args).recover({
-                case exception ⇒ throw new IllegalArgumentException(
-                  ("Cannot instantiate metrics-selector [%s], defined in [%s], " +
-                    "make sure it extends [akka.cluster.routing.MetricsSelector] and " +
-                    "has constructor with [com.typesafe.config.Config] parameter")
-                    .format(fqn, key), exception)
-              }).get
-          }
-
-          AdaptiveLoadBalancingRouter(metricsSelector, nrOfInstances, routees, resizer)
-
-        case _ ⇒ super.createRouterConfig(routerType, key, config, deployment)
-      }
-
-    }
 }
 
 @SerialVersionUID(1L)

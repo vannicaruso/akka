@@ -1,13 +1,17 @@
 package sample.cluster.factorial.japi;
 
+import java.util.Collections;
+
 import akka.actor.UntypedActor;
 import akka.actor.ActorRef;
 import akka.actor.Props;
 import akka.event.Logging;
 import akka.event.LoggingAdapter;
 import akka.routing.FromConfig;
-import akka.cluster.routing.AdaptiveLoadBalancingRouter;
-import akka.cluster.routing.ClusterRouterConfig;
+import akka.cluster.routing.AdaptiveLoadBalancingPool;
+import akka.cluster.routing.AdaptiveLoadBalancingNozzle;
+import akka.cluster.routing.ClusterPool;
+import akka.cluster.routing.ClusterNozzle;
 import akka.cluster.routing.ClusterRouterSettings;
 import akka.cluster.routing.HeapMetricsSelector;
 import akka.cluster.routing.SystemLoadAverageMetricsSelector;
@@ -66,8 +70,8 @@ abstract class FactorialFrontend2 extends UntypedActor {
   boolean allowLocalRoutees = true;
   String useRole = "backend";
   ActorRef backend = getContext().actorOf(
-    Props.empty().withRouter(new ClusterRouterConfig(
-      new AdaptiveLoadBalancingRouter(HeapMetricsSelector.getInstance(), 0),
+    Props.empty().withRouter(new ClusterNozzle(
+      new AdaptiveLoadBalancingNozzle(HeapMetricsSelector.getInstance(), Collections.<String>emptyList()),
       new ClusterRouterSettings(
         totalInstances, routeesPath, allowLocalRoutees, useRole))),
       "factorialBackendRouter2");
@@ -82,8 +86,8 @@ abstract class FactorialFrontend3 extends UntypedActor {
   boolean allowLocalRoutees = false;
   String useRole = "backend";
   ActorRef backend = getContext().actorOf(
-    Props.create(FactorialBackend.class).withRouter(new ClusterRouterConfig(
-      new AdaptiveLoadBalancingRouter(
+    Props.create(FactorialBackend.class).withRouter(new ClusterPool(
+      new AdaptiveLoadBalancingPool(
         SystemLoadAverageMetricsSelector.getInstance(), 0),
       new ClusterRouterSettings(
         totalInstances, maxInstancesPerNode, allowLocalRoutees, useRole))),

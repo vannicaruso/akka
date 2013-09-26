@@ -136,7 +136,7 @@ private[akka] class Deployer(val settings: ActorSystem.Settings, val dynamicAcce
   private val deployments = new AtomicReference(WildcardTree[Deploy]())
   private val config = settings.config.getConfig("akka.actor.deployment")
   protected val default = config.getConfig("default")
-  private val routerTypeMapping: Map[String, String] =
+  val routerTypeMapping: Map[String, String] =
     settings.config.getConfig("akka.actor.router.type-mapping").root.unwrapped.asScala.collect {
       case (key, value: String) ⇒ (key -> value)
     }.toMap
@@ -187,65 +187,38 @@ private[akka] class Deployer(val settings: ActorSystem.Settings, val dynamicAcce
    * @param deployment the deployment config, with defaults
    */
   protected def createRouterConfig(routerType: String, key: String, config: Config, deployment: Config): RouterConfig =
-    if (deployment.getBoolean("routing2"))
-      createNewRouterConfig(routerType, key, config, deployment)
-    else
-      createOldRouterConfig(routerType, key, config, deployment)
+    if (routerType == "from-code") NoRouter
+    else {
+      // need this for backwards compatibility, resizer enabled when including (parts of) resizer section in the deployment
+      val deployment2 =
+        if (config.hasPath("resizer") && !deployment.getBoolean("resizer.enabled"))
+          resizerEnabled.withFallback(deployment)
+        else deployment
 
-  private def createNewRouterConfig(routerType: String, key: String, config: Config, deployment: Config): RouterConfig = {
-    // need this for backwards compatibility, resizer enabled when including (parts of) resizer section in the deployment
-    val deployment2 =
-      if (config.hasPath("resizer") && !deployment.getBoolean("resizer.enabled"))
-        resizerEnabled.withFallback(deployment)
-      else deployment
+      val fqn = routerTypeMapping.getOrElse(routerType,
+        if (deployment.getStringList("routees.paths").isEmpty())
+          routerTypeMapping.getOrElse(routerType + "-pool", routerType)
+        else
+          routerTypeMapping.getOrElse(routerType + "-nozzle", routerType))
 
-    val fqn = routerTypeMapping.getOrElse(routerType,
-      if (deployment.getStringList("routees.paths").isEmpty())
-        routerTypeMapping.getOrElse(routerType + "-pool", routerType)
-      else
-        routerTypeMapping.getOrElse(routerType + "-nozzle", routerType))
+      def throwCannotInstantiateRouter(args: Seq[(Class[_], AnyRef)], cause: Throwable) =
+        throw new IllegalArgumentException(
+          s"Cannot instantiate router [$fqn], defined in [$key], " +
+            s"make sure it extends [${classOf[RouterConfig]}] and has constructor with " +
+            s"[${args(0)._1.getName}] and optional [${args(1)._1.getName}] parameter", cause)
 
-    // first try with Config param, and then with Config and DynamicAccess parameters
-    val args = List(classOf[Config] -> deployment2)
-    dynamicAccess.createInstanceFor[RouterConfig](fqn, args).recover({
-      case e1 ⇒
-        val args2 = List(classOf[Config] -> deployment2, classOf[DynamicAccess] -> dynamicAccess)
-        dynamicAccess.createInstanceFor[RouterConfig](fqn, args2).recover({
-          case e2 ⇒ throw new IllegalArgumentException(
-            s"Cannot instantiate router [$fqn], defined in [$key], " +
-              s"make sure it extends [${classOf[RouterConfig]}] and has constructor with " +
-              s"[${args2(0)._1.getName}] and optional [${args2(1)._1.getName}] parameter", e2)
-        }).get
-    }).get
-  }
-
-  private def createOldRouterConfig(routerType: String, key: String, config: Config, deployment: Config): RouterConfig = {
-    val routees = immutableSeq(deployment.getStringList("routees.paths"))
-    val nrOfInstances = deployment.getInt("nr-of-instances")
-    val resizer = if (config.hasPath("resizer")) Some(DefaultResizer(deployment.getConfig("resizer"))) else None
-
-    routerType match {
-      case "from-code"        ⇒ NoRouter
-      case "round-robin"      ⇒ RoundRobinRouter(nrOfInstances, routees, resizer)
-      case "random"           ⇒ RandomRouter(nrOfInstances, routees, resizer)
-      case "smallest-mailbox" ⇒ SmallestMailboxRouter(nrOfInstances, routees, resizer)
-      case "broadcast"        ⇒ BroadcastRouter(nrOfInstances, routees, resizer)
-      case "scatter-gather" ⇒
-        val within = Duration(deployment.getMilliseconds("within"), TimeUnit.MILLISECONDS)
-        ScatterGatherFirstCompletedRouter(nrOfInstances, routees, within, resizer)
-      case "consistent-hashing" ⇒
-        val vnodes = deployment.getInt("virtual-nodes-factor")
-        ConsistentHashingRouter(nrOfInstances, routees, resizer, virtualNodesFactor = vnodes)
-      case fqn ⇒
-        val args = List(classOf[Config] -> deployment)
-        dynamicAccess.createInstanceFor[RouterConfig](fqn, args).recover({
-          case exception ⇒ throw new IllegalArgumentException(
-            ("Cannot instantiate router [%s], defined in [%s], " +
-              "make sure it extends [akka.routing.RouterConfig] and has constructor with " +
-              "[com.typesafe.config.Config] parameter")
-              .format(fqn, key), exception)
-        }).get
+      // first try with Config param, and then with Config and DynamicAccess parameters
+      val args = List(classOf[Config] -> deployment2)
+      dynamicAccess.createInstanceFor[RouterConfig](fqn, args).recover({
+        case e @ (_: IllegalArgumentException | _: ConfigException) ⇒ throw e
+        case e: NoSuchMethodException ⇒
+          val args2 = List(classOf[Config] -> deployment2, classOf[DynamicAccess] -> dynamicAccess)
+          dynamicAccess.createInstanceFor[RouterConfig](fqn, args2).recover({
+            case e @ (_: IllegalArgumentException | _: ConfigException) ⇒ throw e
+            case e2 ⇒ throwCannotInstantiateRouter(args2, e)
+          }).get
+        case e ⇒ throwCannotInstantiateRouter(args, e)
+      }).get
     }
-  }
 
 }

@@ -10,7 +10,6 @@ import akka.testkit.TestEvent._
 import akka.actor.Props
 import scala.concurrent.Await
 import scala.concurrent.duration._
-import scala.collection.immutable
 import akka.actor.ActorRef
 import akka.pattern.ask
 import scala.util.Try
@@ -21,7 +20,7 @@ object ResizerSpec {
     akka.actor.serialize-messages = off
     akka.actor.deployment {
       /router1 {
-        router = round-robin
+        router = round-robin-pool
         resizer {
           lower-bound = 2
           upper-bound = 3
@@ -52,7 +51,7 @@ class ResizerSpec extends AkkaSpec(ResizerSpec.config) with DefaultTimeout with 
   }
 
   def routeeSize(router: ActorRef): Int =
-    Await.result(router ? CurrentRoutees, remaining).asInstanceOf[RouterRoutees].routees.size
+    Await.result(router ? GetRoutees, remaining).asInstanceOf[Routees].routees.size
 
   "DefaultResizer" must {
 
@@ -61,10 +60,12 @@ class ResizerSpec extends AkkaSpec(ResizerSpec.config) with DefaultTimeout with 
         lowerBound = 2,
         upperBound = 3)
 
-      val c1 = resizer.capacity(immutable.IndexedSeq.empty[ActorRef])
+      val c1 = resizer.capacity(Vector.empty[Routee])
       c1 must be(2)
 
-      val current = immutable.IndexedSeq(system.actorOf(Props[TestActor]), system.actorOf(Props[TestActor]))
+      val current = Vector(
+        ActorRefRoutee(system.actorOf(Props[TestActor])),
+        ActorRefRoutee(system.actorOf(Props[TestActor])))
       val c2 = resizer.capacity(current)
       c2 must be(0)
     }
@@ -102,7 +103,8 @@ class ResizerSpec extends AkkaSpec(ResizerSpec.config) with DefaultTimeout with 
       val resizer = DefaultResizer(
         lowerBound = 2,
         upperBound = 3)
-      val router = system.actorOf(Props[TestActor].withRouter(RoundRobinRouter(resizer = Some(resizer))))
+      val router = system.actorOf(Props[TestActor].withRouter(RoundRobinPool(
+        nrOfInstances = 0, resizer = Some(resizer))))
 
       router ! latch
       router ! latch
@@ -143,10 +145,11 @@ class ResizerSpec extends AkkaSpec(ResizerSpec.config) with DefaultTimeout with 
 
       val router = system.actorOf(Props(new Actor {
         def receive = {
-          case d: FiniteDuration ⇒ Thread.sleep(d.dilated.toMillis); sender ! "done"
-          case "echo"            ⇒ sender ! "reply"
+          case d: FiniteDuration ⇒
+            Thread.sleep(d.dilated.toMillis); sender ! "done"
+          case "echo" ⇒ sender ! "reply"
         }
-      }).withRouter(RoundRobinRouter(resizer = Some(resizer))))
+      }).withRouter(RoundRobinPool(nrOfInstances = 0, resizer = Some(resizer))))
 
       // first message should create the minimum number of routees
       router ! "echo"
@@ -175,7 +178,6 @@ class ResizerSpec extends AkkaSpec(ResizerSpec.config) with DefaultTimeout with 
     }
 
     "backoff" in within(10 seconds) {
-
       val resizer = DefaultResizer(
         lowerBound = 2,
         upperBound = 5,
@@ -190,7 +192,7 @@ class ResizerSpec extends AkkaSpec(ResizerSpec.config) with DefaultTimeout with 
           case n: Int if n <= 0 ⇒ // done
           case n: Int           ⇒ Thread.sleep((n millis).dilated.toMillis)
         }
-      }).withRouter(RoundRobinRouter(resizer = Some(resizer))))
+      }).withRouter(RoundRobinPool(nrOfInstances = 0, resizer = Some(resizer))))
 
       // put some pressure on the router
       for (m ← 0 until 15) {

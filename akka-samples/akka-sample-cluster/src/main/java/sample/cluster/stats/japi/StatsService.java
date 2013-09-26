@@ -1,13 +1,17 @@
 package sample.cluster.stats.japi;
 
+import java.util.Collections;
+
 import sample.cluster.stats.japi.StatsMessages.StatsJob;
 //#imports
 import akka.actor.ActorRef;
 import akka.actor.Props;
 import akka.actor.UntypedActor;
-import akka.cluster.routing.ClusterRouterConfig;
+import akka.cluster.routing.ClusterNozzle;
+import akka.cluster.routing.ClusterPool;
 import akka.cluster.routing.ClusterRouterSettings;
-import akka.routing.ConsistentHashingRouter;
+import akka.routing.ConsistentHashingNozzle;
+import akka.routing.ConsistentHashingPool;
 import akka.routing.ConsistentHashingRouter.ConsistentHashableEnvelope;
 import akka.routing.FromConfig;
 //#imports
@@ -59,8 +63,8 @@ abstract class StatsService2 extends UntypedActor {
   boolean allowLocalRoutees = true;
   String useRole = "compute";
   ActorRef workerRouter = getContext().actorOf(
-      Props.empty().withRouter(new ClusterRouterConfig(
-          new ConsistentHashingRouter(0), new ClusterRouterSettings(
+      Props.empty().withRouter(new ClusterNozzle(
+          new ConsistentHashingNozzle(Collections.<String>emptyList()), new ClusterRouterSettings(
               totalInstances, routeesPath, allowLocalRoutees, useRole))),
       "workerRouter2");
   //#router-lookup-in-code
@@ -74,8 +78,8 @@ abstract class StatsService3 extends UntypedActor {
   boolean allowLocalRoutees = false;
   String useRole = "compute";
   ActorRef workerRouter = getContext().actorOf(
-      Props.create(StatsWorker.class).withRouter(new ClusterRouterConfig(
-          new ConsistentHashingRouter(0), new ClusterRouterSettings(
+      Props.create(StatsWorker.class).withRouter(new ClusterPool(
+          new ConsistentHashingPool(0), new ClusterRouterSettings(
               totalInstances, maxInstancesPerNode, allowLocalRoutees, useRole))),
       "workerRouter3");
   //#router-deploy-in-code

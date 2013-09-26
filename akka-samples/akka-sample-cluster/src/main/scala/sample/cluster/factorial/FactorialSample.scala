@@ -141,13 +141,13 @@ class MetricsListener extends Actor with ActorLogging {
 // not used, only for documentation
 abstract class FactorialFrontend2 extends Actor {
   //#router-lookup-in-code
-  import akka.cluster.routing.ClusterRouterConfig
+  import akka.cluster.routing.ClusterNozzle
   import akka.cluster.routing.ClusterRouterSettings
-  import akka.cluster.routing.AdaptiveLoadBalancingRouter
+  import akka.cluster.routing.AdaptiveLoadBalancingNozzle
   import akka.cluster.routing.HeapMetricsSelector
 
   val backend = context.actorOf(Props.empty.withRouter(
-    ClusterRouterConfig(AdaptiveLoadBalancingRouter(HeapMetricsSelector),
+    ClusterNozzle(AdaptiveLoadBalancingNozzle(HeapMetricsSelector),
       ClusterRouterSettings(
         totalInstances = 100, routeesPath = "/user/factorialBackend",
         allowLocalRoutees = true, useRole = Some("backend")))),
@@ -158,13 +158,13 @@ abstract class FactorialFrontend2 extends Actor {
 // not used, only for documentation
 abstract class FactorialFrontend3 extends Actor {
   //#router-deploy-in-code
-  import akka.cluster.routing.ClusterRouterConfig
+  import akka.cluster.routing.ClusterPool
   import akka.cluster.routing.ClusterRouterSettings
-  import akka.cluster.routing.AdaptiveLoadBalancingRouter
+  import akka.cluster.routing.AdaptiveLoadBalancingPool
   import akka.cluster.routing.SystemLoadAverageMetricsSelector
 
   val backend = context.actorOf(Props[FactorialBackend].withRouter(
-    ClusterRouterConfig(AdaptiveLoadBalancingRouter(
+    ClusterPool(AdaptiveLoadBalancingPool(
       SystemLoadAverageMetricsSelector), ClusterRouterSettings(
       totalInstances = 100, maxInstancesPerNode = 3,
       allowLocalRoutees = false, useRole = Some("backend")))),

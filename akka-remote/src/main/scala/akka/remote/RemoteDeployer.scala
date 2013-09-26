@@ -9,8 +9,7 @@ import akka.remote.routing._
 import akka.ConfigurationException
 import akka.japi.Util.immutableSeq
 import com.typesafe.config._
-import akka.routing2.RouterConfig2
-import akka.routing2.Pool
+import akka.routing.Pool
 import akka.remote.routing.RemoteRouterConfig
 
 @SerialVersionUID(1L)
@@ -34,13 +33,8 @@ private[akka] class RemoteDeployer(_settings: ActorSystem.Settings, _pm: Dynamic
             val nodes = immutableSeq(deploy.config.getStringList("target.nodes")).map(AddressFromURIString(_))
             if (nodes.isEmpty || deploy.routerConfig == NoRouter) d
             else deploy.routerConfig match {
-              case r: Pool ⇒
-                Some(deploy.copy(routerConfig = akka.remote.routing2.RemoteRouterConfig(r, nodes)))
-              case r: RouterConfig2 ⇒
-                d
-              case old ⇒
-                // FIXME #3549 temporary
-                Some(deploy.copy(routerConfig = RemoteRouterConfig(deploy.routerConfig, nodes)))
+              case r: Pool ⇒ Some(deploy.copy(routerConfig = RemoteRouterConfig(r, nodes)))
+              case _       ⇒ d
             }
         }
       case None ⇒ None
