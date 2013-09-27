@@ -22,7 +22,6 @@ import akka.remote.RemoteDeployer
 import akka.remote.routing.RemoteRouterConfig
 import akka.routing.RouterConfig
 import akka.routing.DefaultResizer
-import akka.cluster.routing.ClusterRouterSettings
 import akka.cluster.routing.AdaptiveLoadBalancingRouter
 import akka.cluster.routing.MixMetricsSelector
 import akka.cluster.routing.HeapMetricsSelector
@@ -38,6 +37,8 @@ import akka.cluster.routing.ClusterPool
 import akka.cluster.routing.ClusterNozzle
 import com.typesafe.config.ConfigFactory
 import akka.routing.DeprecatedRouterConfig
+import akka.cluster.routing.ClusterPoolSettings
+import akka.cluster.routing.ClusterNozzleSettings
 
 /**
  * INTERNAL API
@@ -103,18 +104,20 @@ private[akka] class ClusterDeployer(_settings: ActorSystem.Settings, _pm: Dynami
           if (deploy.routerConfig.isInstanceOf[RemoteRouterConfig])
             throw new ConfigurationException("Cluster deployment can't be combined with [%s]".format(deploy.routerConfig))
 
-          val clusterRouterSettings = ClusterRouterSettings.fromConfig(deploy.config)
-
           deploy.routerConfig match {
             case r: DeprecatedRouterConfig ⇒
-              Some(deploy.copy(
-                routerConfig = ClusterPool(r, clusterRouterSettings), scope = ClusterScope))
+              if (config.hasPath("cluster.routees-path"))
+                Some(deploy.copy(
+                  routerConfig = ClusterNozzle(r, ClusterNozzleSettings.fromConfig(deploy.config)), scope = ClusterScope))
+              else
+                Some(deploy.copy(
+                  routerConfig = ClusterPool(r, ClusterPoolSettings.fromConfig(deploy.config)), scope = ClusterScope))
             case r: Pool ⇒
               Some(deploy.copy(
-                routerConfig = ClusterPool(r, clusterRouterSettings), scope = ClusterScope))
+                routerConfig = ClusterPool(r, ClusterPoolSettings.fromConfig(deploy.config)), scope = ClusterScope))
             case r: Nozzle ⇒
               Some(deploy.copy(
-                routerConfig = ClusterNozzle(r, clusterRouterSettings), scope = ClusterScope))
+                routerConfig = ClusterNozzle(r, ClusterNozzleSettings.fromConfig(deploy.config)), scope = ClusterScope))
             case other ⇒
               throw new IllegalArgumentException(s"Cluster aware router can only wrap Pool or Nozzle, got [${other.getClass.getName}]")
           }

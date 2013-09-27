@@ -107,7 +107,8 @@ abstract class ClusterRoundRobinSpec extends MultiNodeSpec(ClusterRoundRobinMult
 
   lazy val router1 = system.actorOf(Props[SomeActor].withRouter(FromConfig()), "router1")
   lazy val router2 = system.actorOf(Props[SomeActor].withRouter(ClusterPool(RoundRobinPool(nrOfInstances = 0),
-    ClusterRouterSettings(totalInstances = 3, maxInstancesPerNode = 1, useRole = None))), "router2")
+    ClusterPoolSettings(totalInstances = 3, maxInstancesPerNode = 1, allowLocalRoutees = true, useRole = None))),
+    "router2")
   lazy val router3 = system.actorOf(Props[SomeActor].withRouter(FromConfig), "router3")
   lazy val router4 = system.actorOf(Props.empty.withRouter(FromConfig), "router4")
   lazy val router5 = system.actorOf(Props[SomeActor].withRouter(RoundRobinPool(nrOfInstances = 0)), "router5")

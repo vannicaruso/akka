@@ -41,79 +41,33 @@ import akka.actor.RelativeActorPath
 import com.typesafe.config.Config
 import akka.routing.DeprecatedRouterConfig
 
-object ClusterRouterSettings {
-  /**
-   * Settings for create and deploy of the routees
-   */
-  def apply(totalInstances: Int, maxInstancesPerNode: Int, allowLocalRoutees: Boolean, useRole: Option[String]): ClusterRouterSettings =
-    new ClusterRouterSettings(totalInstances, maxInstancesPerNode, routeesPath = "", allowLocalRoutees, useRole)
-
-  /**
-   * Settings for remote deployment of the routees, allowed to use routees on own node
-   */
-  def apply(totalInstances: Int, maxInstancesPerNode: Int, useRole: Option[String]): ClusterRouterSettings =
-    apply(totalInstances, maxInstancesPerNode, allowLocalRoutees = true, useRole)
-
-  /**
-   * Settings for lookup of the routees
-   */
-  def apply(totalInstances: Int, routeesPath: String, allowLocalRoutees: Boolean, useRole: Option[String]): ClusterRouterSettings =
-    new ClusterRouterSettings(totalInstances, maxInstancesPerNode = 1, routeesPath, allowLocalRoutees, useRole)
-
-  /**
-   * Settings for lookup of the routees, allowed to use routees on own node
-   */
-  def apply(totalInstances: Int, routeesPath: String, useRole: Option[String]): ClusterRouterSettings =
-    apply(totalInstances, routeesPath, allowLocalRoutees = true, useRole)
-
-  def useRoleOption(role: String): Option[String] = role match {
-    case null | "" ⇒ None
-    case _         ⇒ Some(role)
-  }
-
-  /**
-   * Create settings from deployment config
-   */
-  def fromConfig(config: Config): ClusterRouterSettings =
-    ClusterRouterSettings(
+object ClusterNozzleSettings {
+  def fromConfig(config: Config): ClusterNozzleSettings =
+    ClusterNozzleSettings(
       totalInstances = config.getInt("nr-of-instances"),
-      maxInstancesPerNode = config.getInt("cluster.max-nr-of-instances-per-node"),
-      allowLocalRoutees = config.getBoolean("cluster.allow-local-routees"),
       routeesPath = config.getString("cluster.routees-path"),
-      useRole = useRoleOption(config.getString("cluster.use-role")))
+      allowLocalRoutees = config.getBoolean("cluster.allow-local-routees"),
+      useRole = ClusterRouterSettingsBase.useRoleOption(config.getString("cluster.use-role")))
 }
 
 /**
  * `totalInstances` of cluster router must be > 0
- * `maxInstancesPerNode` of cluster router must be > 0
- * `maxInstancesPerNode` of cluster router must be 1 when routeesPath is defined
  */
 @SerialVersionUID(1L)
-case class ClusterRouterSettings private[akka] (
+case class ClusterNozzleSettings(
   totalInstances: Int,
-  maxInstancesPerNode: Int,
   routeesPath: String,
   allowLocalRoutees: Boolean,
-  useRole: Option[String]) {
+  useRole: Option[String]) extends ClusterRouterSettingsBase {
 
   /**
-   * Java API: Settings for create and deploy of the routees
-   */
-  def this(totalInstances: Int, maxInstancesPerNode: Int, allowLocalRoutees: Boolean, useRole: String) =
-    this(totalInstances, maxInstancesPerNode, routeesPath = "", allowLocalRoutees,
-      ClusterRouterSettings.useRoleOption(useRole))
-
-  /**
-   * Java API: Settings for lookup of the routees
+   * Java API
    */
   def this(totalInstances: Int, routeesPath: String, allowLocalRoutees: Boolean, useRole: String) =
-    this(totalInstances, maxInstancesPerNode = 1, routeesPath, allowLocalRoutees,
-      ClusterRouterSettings.useRoleOption(useRole))
+    this(totalInstances, routeesPath, allowLocalRoutees, ClusterRouterSettingsBase.useRoleOption(useRole))
 
   if (totalInstances <= 0) throw new IllegalArgumentException("totalInstances of cluster router must be > 0")
-  if (maxInstancesPerNode <= 0) throw new IllegalArgumentException("maxInstancesPerNode of cluster router must be > 0")
-  if (isRouteesPathDefined && maxInstancesPerNode != 1)
-    throw new IllegalArgumentException("maxInstancesPerNode of cluster router must be 1 when routeesPath is defined")
+  if (!isRouteesPathDefined) throw new IllegalArgumentException("routeesPath must be defined")
 
   routeesPath match {
     case RelativeActorPath(elements) ⇒ // good
@@ -125,6 +79,58 @@ case class ClusterRouterSettings private[akka] (
 
 }
 
+object ClusterPoolSettings {
+  def fromConfig(config: Config): ClusterPoolSettings =
+    ClusterPoolSettings(
+      totalInstances = config.getInt("nr-of-instances"),
+      maxInstancesPerNode = config.getInt("cluster.max-nr-of-instances-per-node"),
+      allowLocalRoutees = config.getBoolean("cluster.allow-local-routees"),
+      useRole = ClusterRouterSettingsBase.useRoleOption(config.getString("cluster.use-role")))
+}
+
+/**
+ * `totalInstances` of cluster router must be > 0
+ * `maxInstancesPerNode` of cluster router must be > 0
+ * `maxInstancesPerNode` of cluster router must be 1 when routeesPath is defined
+ */
+@SerialVersionUID(1L)
+case class ClusterPoolSettings(
+  totalInstances: Int,
+  maxInstancesPerNode: Int,
+  allowLocalRoutees: Boolean,
+  useRole: Option[String]) extends ClusterRouterSettingsBase {
+
+  /**
+   * Java API
+   */
+  def this(totalInstances: Int, maxInstancesPerNode: Int, allowLocalRoutees: Boolean, useRole: String) =
+    this(totalInstances, maxInstancesPerNode, allowLocalRoutees, ClusterRouterSettingsBase.useRoleOption(useRole))
+
+  if (maxInstancesPerNode <= 0) throw new IllegalArgumentException("maxInstancesPerNode of cluster pool router must be > 0")
+
+}
+
+/**
+ * INTERNAL API
+ */
+private[akka] object ClusterRouterSettingsBase {
+  def useRoleOption(role: String): Option[String] = role match {
+    case null | "" ⇒ None
+    case _         ⇒ Some(role)
+  }
+}
+
+/**
+ * INTERNAL API
+ */
+private[akka] trait ClusterRouterSettingsBase {
+  def totalInstances: Int
+  def allowLocalRoutees: Boolean
+  def useRole: Option[String]
+
+  if (totalInstances <= 0) throw new IllegalArgumentException("totalInstances of cluster router must be > 0")
+}
+
 /**
  * [[akka.routing.RouterConfig]] implementation for deployment on cluster nodes.
  * Delegates other duties to the local [[akka.routing.RouterConfig]],
@@ -132,7 +138,7 @@ case class ClusterRouterSettings private[akka] (
  * [[akka.routing.RoundRobinRouter]] or custom routers.
  */
 @SerialVersionUID(1L)
-final case class ClusterNozzle(local: Nozzle, settings: ClusterRouterSettings) extends Nozzle with ClusterRouterConfigBase {
+final case class ClusterNozzle(local: Nozzle, settings: ClusterNozzleSettings) extends Nozzle with ClusterRouterConfigBase {
 
   require(settings.routeesPath.nonEmpty, "routeesPath must be defined")
 
@@ -165,7 +171,7 @@ final case class ClusterNozzle(local: Nozzle, settings: ClusterRouterSettings) e
  * [[akka.routing.RoundRobinRouter]] or custom routers.
  */
 @SerialVersionUID(1L)
-final case class ClusterPool(local: Pool, settings: ClusterRouterSettings) extends Pool with ClusterRouterConfigBase {
+final case class ClusterPool(local: Pool, settings: ClusterPoolSettings) extends Pool with ClusterRouterConfigBase {
 
   require(local.resizer.isEmpty, "Resizer can't be used together with cluster router")
 
@@ -214,7 +220,7 @@ final case class ClusterPool(local: Pool, settings: ClusterRouterSettings) exten
  */
 private[akka] trait ClusterRouterConfigBase extends RouterConfig {
   def local: RouterConfig
-  def settings: ClusterRouterSettings
+  def settings: ClusterRouterSettingsBase
   override def createRouter(system: ActorSystem): Router = local.createRouter(system)
   override def routerDispatcher: String = local.routerDispatcher
   override def stopRouterWhenAllRouteesRemoved: Boolean = false
@@ -226,58 +232,11 @@ private[akka] trait ClusterRouterConfigBase extends RouterConfig {
     (msg.isInstanceOf[ClusterDomainEvent]) || super.isManagementMessage(msg)
 }
 
-@deprecated("Use ClusterPool or ClusterNozzle", "2.3")
-@SerialVersionUID(1L)
-final case class ClusterRouterConfig(local: DeprecatedRouterConfig, settings: ClusterRouterSettings) extends DeprecatedRouterConfig with ClusterRouterConfigBase {
-
-  require(local.resizer.isEmpty, "Resizer can't be used together with cluster router")
-
-  @transient private val childNameCounter = new AtomicInteger
-
-  /**
-   * INTERNAL API
-   */
-  override private[akka] def newRoutee(routeeProps: Props, context: ActorContext): Routee = {
-    val name = "c" + childNameCounter.incrementAndGet
-    val ref = context.asInstanceOf[ActorCell].attachChild(routeeProps, name, systemService = false)
-    ActorRefRoutee(ref)
-  }
-
-  override def nrOfInstances: Int = if (settings.allowLocalRoutees) settings.maxInstancesPerNode else 0
-
-  override def paths: immutable.Iterable[String] =
-    if (settings.allowLocalRoutees && settings.routeesPath.nonEmpty) List(settings.routeesPath) else Nil
-
-  override def resizer: Option[Resizer] = local.resizer
-
-  /**
-   * INTERNAL API
-   */
-  override private[akka] def createRouterActor(): RouterActor =
-    if (settings.routeesPath.isEmpty)
-      new ClusterPoolActor(local.supervisorStrategy, settings)
-    else
-      new ClusterNozzleActor(settings)
-
-  override def supervisorStrategy: SupervisorStrategy = local.supervisorStrategy
-
-  override def withFallback(other: RouterConfig): RouterConfig = other match {
-    case ClusterRouterConfig(_: ClusterRouterConfig, _) ⇒ throw new IllegalStateException(
-      "ClusterRouterConfig is not allowed to wrap a ClusterRouterConfig")
-    case ClusterRouterConfig(local, _) ⇒
-      // FIXME #3549 is this always correct?
-      copy(local = this.local.withFallback(local).asInstanceOf[DeprecatedRouterConfig])
-    case _ ⇒
-      copy(local = this.local.withFallback(other).asInstanceOf[DeprecatedRouterConfig])
-  }
-
-}
-
 /**
  * INTERNAL API
  */
 private[akka] class ClusterPoolActor(
-  supervisorStrategy: SupervisorStrategy, val settings: ClusterRouterSettings)
+  supervisorStrategy: SupervisorStrategy, val settings: ClusterPoolSettings)
   extends RouterPoolActor(supervisorStrategy) with ClusterRouterActor {
 
   override def receive = clusterReceive orElse super.receive
@@ -285,7 +244,7 @@ private[akka] class ClusterPoolActor(
   /**
    * Adds routees based on totalInstances and maxInstancesPerNode settings
    */
-  def addRoutees(): Unit = {
+  override def addRoutees(): Unit = {
     @tailrec
     def doAddRoutees(): Unit = selectDeploymentTarget match {
       case None ⇒ // done
@@ -304,12 +263,14 @@ private[akka] class ClusterPoolActor(
     doAddRoutees()
   }
 
+  override def maxInstancesPerNode: Int = settings.maxInstancesPerNode
+
 }
 
 /**
  * INTERNAL API
  */
-private[akka] class ClusterNozzleActor(val settings: ClusterRouterSettings)
+private[akka] class ClusterNozzleActor(val settings: ClusterNozzleSettings)
   extends RouterActor with ClusterRouterActor {
 
   val nozzle = cell.routerConfig match {
@@ -323,7 +284,7 @@ private[akka] class ClusterNozzleActor(val settings: ClusterRouterSettings)
   /**
    * Adds routees based on totalInstances and maxInstancesPerNode settings
    */
-  def addRoutees(): Unit = {
+  override def addRoutees(): Unit = {
     @tailrec
     def doAddRoutees(): Unit = selectDeploymentTarget match {
       case None ⇒ // done
@@ -339,6 +300,8 @@ private[akka] class ClusterNozzleActor(val settings: ClusterRouterSettings)
     doAddRoutees()
   }
 
+  override def maxInstancesPerNode: Int = 1
+
 }
 
 /**
@@ -348,7 +311,7 @@ private[akka] class ClusterNozzleActor(val settings: ClusterRouterSettings)
  */
 private[akka] trait ClusterRouterActor { this: RouterActor ⇒
 
-  def settings: ClusterRouterSettings
+  def settings: ClusterRouterSettingsBase
 
   if (!cell.routerConfig.isInstanceOf[Pool] && !cell.routerConfig.isInstanceOf[Nozzle])
     throw ActorInitializationException("Cluster router actor can only be used with Pool or Nozzle, not with " +
@@ -409,6 +372,8 @@ private[akka] trait ClusterRouterActor { this: RouterActor ⇒
    */
   def addRoutees(): Unit
 
+  def maxInstancesPerNode: Int
+
   def selectDeploymentTarget: Option[Address] = {
     val currentRoutees = cell.router.routees
     val currentNodes = availableNodes
@@ -423,7 +388,7 @@ private[akka] trait ClusterRouterActor { this: RouterActor ⇒
         }
 
       val (address, count) = numberOfRouteesPerNode.minBy(_._2)
-      if (count < settings.maxInstancesPerNode) Some(address) else None
+      if (count < maxInstancesPerNode) Some(address) else None
     }
   }
 

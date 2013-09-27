@@ -12,7 +12,8 @@ import akka.cluster.routing.AdaptiveLoadBalancingPool;
 import akka.cluster.routing.AdaptiveLoadBalancingNozzle;
 import akka.cluster.routing.ClusterPool;
 import akka.cluster.routing.ClusterNozzle;
-import akka.cluster.routing.ClusterRouterSettings;
+import akka.cluster.routing.ClusterNozzleSettings;
+import akka.cluster.routing.ClusterPoolSettings;
 import akka.cluster.routing.HeapMetricsSelector;
 import akka.cluster.routing.SystemLoadAverageMetricsSelector;
 
@@ -72,7 +73,7 @@ abstract class FactorialFrontend2 extends UntypedActor {
   ActorRef backend = getContext().actorOf(
     Props.empty().withRouter(new ClusterNozzle(
       new AdaptiveLoadBalancingNozzle(HeapMetricsSelector.getInstance(), Collections.<String>emptyList()),
-      new ClusterRouterSettings(
+      new ClusterNozzleSettings(
         totalInstances, routeesPath, allowLocalRoutees, useRole))),
       "factorialBackendRouter2");
   //#router-lookup-in-code
@@ -89,7 +90,7 @@ abstract class FactorialFrontend3 extends UntypedActor {
     Props.create(FactorialBackend.class).withRouter(new ClusterPool(
       new AdaptiveLoadBalancingPool(
         SystemLoadAverageMetricsSelector.getInstance(), 0),
-      new ClusterRouterSettings(
+      new ClusterPoolSettings(
         totalInstances, maxInstancesPerNode, allowLocalRoutees, useRole))),
       "factorialBackendRouter3");
   //#router-deploy-in-code

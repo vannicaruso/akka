@@ -7,10 +7,10 @@ import akka.testkit._
 import akka.actor._
 import akka.routing._
 import com.typesafe.config._
-import akka.cluster.routing.ClusterRouterConfig
-import akka.cluster.routing.ClusterRouterSettings
 import akka.cluster.routing.ClusterPool
 import akka.cluster.routing.ClusterNozzle
+import akka.cluster.routing.ClusterPoolSettings
+import akka.cluster.routing.ClusterNozzleSettings
 
 object ClusterDeployerSpec {
   val deployerConf = ConfigFactory.parseString("""
@@ -56,7 +56,7 @@ class ClusterDeployerSpec extends AkkaSpec(ClusterDeployerSpec.deployerConf) {
         Deploy(
           service,
           deployment.get.config,
-          ClusterPool(RoundRobinPool(20), ClusterRouterSettings(
+          ClusterPool(RoundRobinPool(20), ClusterPoolSettings(
             totalInstances = 20, maxInstancesPerNode = 3, allowLocalRoutees = false, useRole = None)),
           ClusterScope,
           Deploy.NoDispatcherGiven,
@@ -72,7 +72,7 @@ class ClusterDeployerSpec extends AkkaSpec(ClusterDeployerSpec.deployerConf) {
         Deploy(
           service,
           deployment.get.config,
-          ClusterNozzle(RoundRobinNozzle(List("/user/myservice")), ClusterRouterSettings(
+          ClusterNozzle(RoundRobinNozzle(List("/user/myservice")), ClusterNozzleSettings(
             totalInstances = 20, routeesPath = "/user/myservice", allowLocalRoutees = false, useRole = None)),
           ClusterScope,
           "mydispatcher",

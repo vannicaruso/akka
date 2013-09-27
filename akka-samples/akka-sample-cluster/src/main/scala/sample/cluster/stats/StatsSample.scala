@@ -225,11 +225,11 @@ class StatsSampleClient(servicePath: String) extends Actor {
 abstract class StatsService2 extends Actor {
   //#router-lookup-in-code
   import akka.cluster.routing.ClusterNozzle
-  import akka.cluster.routing.ClusterRouterSettings
+  import akka.cluster.routing.ClusterNozzleSettings
   import akka.routing.ConsistentHashingNozzle
 
   val workerRouter = context.actorOf(Props.empty.withRouter(
-    ClusterNozzle(ConsistentHashingNozzle(Nil), ClusterRouterSettings(
+    ClusterNozzle(ConsistentHashingNozzle(Nil), ClusterNozzleSettings(
       totalInstances = 100, routeesPath = "/user/statsWorker",
       allowLocalRoutees = true, useRole = Some("compute")))),
     name = "workerRouter2")
@@ -240,11 +240,11 @@ abstract class StatsService2 extends Actor {
 abstract class StatsService3 extends Actor {
   //#router-deploy-in-code
   import akka.cluster.routing.ClusterPool
-  import akka.cluster.routing.ClusterRouterSettings
+  import akka.cluster.routing.ClusterPoolSettings
   import akka.routing.ConsistentHashingPool
 
   val workerRouter = context.actorOf(Props[StatsWorker].withRouter(
-    ClusterPool(ConsistentHashingPool(0), ClusterRouterSettings(
+    ClusterPool(ConsistentHashingPool(0), ClusterPoolSettings(
       totalInstances = 100, maxInstancesPerNode = 3,
       allowLocalRoutees = false, useRole = None))),
     name = "workerRouter3")
