@@ -158,7 +158,6 @@ final case class ClusterRouterConfig(local: DeprecatedRouterConfig, settings: Cl
     case ClusterRouterConfig(_: ClusterRouterConfig, _) ⇒ throw new IllegalStateException(
       "ClusterRouterConfig is not allowed to wrap a ClusterRouterConfig")
     case ClusterRouterConfig(local, _) ⇒
-      // FIXME #3549 is this always correct?
       copy(local = this.local.withFallback(local).asInstanceOf[DeprecatedRouterConfig])
     case _ ⇒
       copy(local = this.local.withFallback(other).asInstanceOf[DeprecatedRouterConfig])

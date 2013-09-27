@@ -44,18 +44,10 @@ trait RouterConfig extends Serializable {
   def createRouter(system: ActorSystem): Router
 
   /**
-   * INTERNAL API
-   * The router "head" actor.
-   */
-  private[akka] def createRouterActor(): RouterActor
-
-  /**
    * Dispatcher ID to use for running the “head” actor, which handles
    * supervision, death watch and router management messages
    */
   def routerDispatcher: String
-
-  // FIXME #3549 try to make more things INTERNAL API
 
   /**
    * Possibility to define an actor for controlling the routing
@@ -67,7 +59,8 @@ trait RouterConfig extends Serializable {
   def routingLogicController(routingLogic: RoutingLogic): Option[Props] = None
 
   /**
-   * Is the message handled by the router head actor
+   * Is the message handled by the router head actor or the
+   * [[#routingLogicController]] actor.
    */
   def isManagementMessage(msg: Any): Boolean = msg match {
     case _: AutoReceivedMessage | _: Terminated | _: RouterManagementMesssage ⇒ true
@@ -81,7 +74,7 @@ trait RouterConfig extends Serializable {
   def stopRouterWhenAllRouteesRemoved: Boolean = true
 
   /**
-   * Overridable merge strategy, by default completely prefers “this” (i.e. no merge).
+   * Overridable merge strategy, by default completely prefers `this` (i.e. no merge).
    */
   def withFallback(other: RouterConfig): RouterConfig = this
 
@@ -89,6 +82,12 @@ trait RouterConfig extends Serializable {
    * Check that everything is there which is needed. Called in constructor of RoutedActorRef to fail early.
    */
   def verifyConfig(path: ActorPath): Unit = ()
+
+  /**
+   * INTERNAL API
+   * The router "head" actor.
+   */
+  private[akka] def createRouterActor(): RouterActor
 
 }
 

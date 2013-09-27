@@ -46,7 +46,7 @@ class ConsistentHashingRouterDocSpec extends AkkaSpec with ImplicitSender {
     import akka.routing.ConsistentHashingRouter.ConsistentHashableEnvelope
 
     def hashMapping: ConsistentHashMapping = {
-      case Evict(key) ⇒ println("# EVICT"); key
+      case Evict(key) ⇒ key
     }
 
     val cache = system.actorOf(Props[Cache].withRouter(ConsistentHashingRouter(10,

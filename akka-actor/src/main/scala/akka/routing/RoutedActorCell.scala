@@ -84,8 +84,11 @@ private[akka] class RoutedActorCell(
 
   private def stopIfChild(routee: Routee): Unit = routee match {
     case ActorRefRoutee(ref) ⇒ child(ref.path.name) match {
-      case Some(`ref`) ⇒ ref ! PoisonPill
-      case _           ⇒
+      case Some(`ref`) ⇒
+        // The reason for the delay is to give concurrent
+        // messages a chance to be placed in mailbox before sending PoisonPill.
+        system.scheduler.scheduleOnce(1.second, ref, PoisonPill)(dispatcher)
+      case _ ⇒
     }
     case _ ⇒
   }

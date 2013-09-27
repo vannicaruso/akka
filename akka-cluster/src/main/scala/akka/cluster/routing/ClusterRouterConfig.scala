@@ -153,10 +153,8 @@ final case class ClusterNozzle(local: Nozzle, settings: ClusterNozzleSettings) e
     case ClusterNozzle(_: ClusterNozzle, _) ⇒ throw new IllegalStateException(
       "ClusterNozzle is not allowed to wrap a ClusterNozzle")
     case ClusterNozzle(local, _) ⇒
-      // FIXME #3549 is this always correct?
       copy(local = this.local.withFallback(local).asInstanceOf[Nozzle])
     case ClusterRouterConfig(local, _) ⇒
-      // FIXME #3549 is this always correct?
       copy(local = this.local.withFallback(local).asInstanceOf[Nozzle])
     case _ ⇒
       copy(local = this.local.withFallback(other).asInstanceOf[Nozzle])
@@ -204,10 +202,8 @@ final case class ClusterPool(local: Pool, settings: ClusterPoolSettings) extends
     case ClusterPool(_: ClusterPool, _) ⇒ throw new IllegalStateException(
       "ClusterPool is not allowed to wrap a ClusterPool")
     case ClusterPool(otherLocal, _) ⇒
-      // FIXME #3549 is this always correct?
       copy(local = this.local.withFallback(otherLocal).asInstanceOf[Pool])
     case ClusterRouterConfig(otherLocal, _) ⇒
-      // FIXME #3549 is this always correct?
       copy(local = this.local.withFallback(otherLocal).asInstanceOf[Pool])
     case _ ⇒
       copy(local = this.local.withFallback(other).asInstanceOf[Pool])

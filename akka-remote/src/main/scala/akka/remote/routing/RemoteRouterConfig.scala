@@ -70,7 +70,6 @@ final case class RemoteRouterConfig(local: Pool, nodes: Iterable[Address]) exten
     case RemoteRouterConfig(local: RemoteRouterConfig, nodes) ⇒ throw new IllegalStateException(
       "RemoteRouterConfig is not allowed to wrap a RemoteRouterConfig")
     case RemoteRouterConfig(local: Pool, nodes) ⇒
-      // FIXME #3549 is this always correct?
       copy(local = this.local.withFallback(local).asInstanceOf[Pool])
     case _ ⇒ copy(local = this.local.withFallback(other).asInstanceOf[Pool])
   }

@@ -6,9 +6,19 @@ package akka.routing
 import scala.collection.immutable
 import akka.actor.ActorRef
 import akka.actor.ActorSelection
+import akka.actor.InternalActorRef
+import akka.japi.Util.immutableSeq
 
 trait RoutingLogic {
+  /**
+   * Pick the destination for a given message
+   *
+   * When implemented from Java it can be good to know that
+   * `routees.apply(index)` can be used to get an element
+   * from the `IndexedSeq`.
+   */
   def select(message: Any, routees: immutable.IndexedSeq[Routee]): Routee
+
 }
 
 trait Routee {
@@ -26,7 +36,6 @@ case class ActorSelectionRoutee(selection: ActorSelection) extends Routee {
 }
 
 object NoRoutee extends Routee {
-  // FIXME #3549 not deadLetters any more?
   override def send(message: Any, sender: ActorRef): Unit = ()
 }
 
@@ -37,7 +46,10 @@ case class SeveralRoutees(routees: immutable.IndexedSeq[Routee]) extends Routee 
 
 final case class Router(val logic: RoutingLogic, val routees: immutable.IndexedSeq[Routee] = Vector.empty) {
 
-  // FIXME #3549 Java api
+  /**
+   * Java API
+   */
+  def this(logic: RoutingLogic, routees: java.lang.Iterable[Routee]) = this(logic, immutableSeq(routees).toVector)
 
   /**
    * If the message is a [[akka.routing.RouterEnvelope]] it will be
@@ -46,8 +58,15 @@ final case class Router(val logic: RoutingLogic, val routees: immutable.IndexedS
   def route(message: Any, sender: ActorRef): Unit =
     message match {
       case akka.routing.Broadcast(msg) ⇒ SeveralRoutees(routees).send(msg, sender)
-      case msg                         ⇒ logic.select(msg, routees).send(unwrap(msg), sender)
+      case msg                         ⇒ send(logic.select(msg, routees), message, sender)
     }
+
+  private def send(routee: Routee, msg: Any, sender: ActorRef): Unit = {
+    if (routee == NoRoutee && sender.isInstanceOf[InternalActorRef])
+      sender.asInstanceOf[InternalActorRef].provider.deadLetters.tell(unwrap(msg), sender)
+    else
+      routee.send(unwrap(msg), sender)
+  }
 
   private def unwrap(msg: Any): Any = msg match {
     case env: RouterEnvelope ⇒ env.message

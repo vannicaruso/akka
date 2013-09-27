@@ -69,7 +69,6 @@ case object DefaultResizer {
       rampupRate = resizerConfig.getDouble("rampup-rate"),
       backoffThreshold = resizerConfig.getDouble("backoff-threshold"),
       backoffRate = resizerConfig.getDouble("backoff-rate"),
-      stopDelay = Duration(resizerConfig.getMilliseconds("stop-delay"), TimeUnit.MILLISECONDS),
       messagesPerResize = resizerConfig.getInt("messages-per-resize"))
 
   def fromConfig(resizerConfig: Config): Option[DefaultResizer] =
@@ -127,14 +126,6 @@ case class DefaultResizer(
  * capacity is 9 it will request an decrease of 1 routee.
  */
   backoffRate: Double = 0.1,
-  /**
- * When the resizer reduce the capacity the abandoned routee actors are stopped
- * with PoisonPill after this delay. The reason for the delay is to give concurrent
- * messages a chance to be placed in mailbox before sending PoisonPill.
- * Use 0 seconds to skip delay.
- */
-  // FIXME #3549
-  stopDelay: FiniteDuration = 1.second,
   /**
  * Number of messages between resize operation.
  * Use 1 to resize before each message.
@@ -292,29 +283,9 @@ private[akka] final class ResizablePoolCell(
       } else if (requestedCapacity < 0) {
         val currentRoutees = router.routees
         val abandon = currentRoutees.drop(currentRoutees.length + requestedCapacity)
-
-        // FIXME #3549 do we need delayedStop?
-        delayedStop(abandon)
-        removeRoutees(abandon, stopChild = false)
+        removeRoutees(abandon, stopChild = true)
       }
     } finally resizeInProgress.set(false)
-  }
-
-  /**
-   * Give concurrent messages a chance to be placed in mailbox before
-   * sending PoisonPill.
-   */
-  private def delayedStop(abandon: immutable.IndexedSeq[Routee]): Unit = {
-    val stopDelay: FiniteDuration = 1.second // FIXME #3549 pick from config
-    if (abandon.nonEmpty) {
-      if (stopDelay <= Duration.Zero) {
-        abandon.foreach(_.send(PoisonPill, self))
-      } else {
-        system.scheduler.scheduleOnce(stopDelay) {
-          abandon.foreach(_.send(PoisonPill, self))
-        }(dispatcher)
-      }
-    }
   }
 
 }
