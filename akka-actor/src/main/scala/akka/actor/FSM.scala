@@ -4,7 +4,6 @@
 package akka.actor
 
 import language.implicitConversions
-import akka.util._
 import scala.concurrent.duration.Duration
 import scala.collection.mutable
 import akka.routing.{ Deafen, Listen, Listeners }
@@ -749,3 +748,143 @@ trait LoggingFSM[S, D] extends FSM[S, D] { this: Actor ⇒
 
 }
 
+/**
+ * Java API
+ *
+ * Finite State Machine actor base class.
+ *
+ * TODO:ban #3770 doc missing
+ */
+abstract class AbstractFSM[S, D] extends FSM[S, D] {
+  import akka.japi.pf._
+  import akka.japi.pf.SAM._
+  import java.util.{ List ⇒ JList }
+  import FSM._
+
+  /**
+   * Insert a new StateFunction at the end of the processing chain for the
+   * given state.
+   *
+   * @param stateName designator for the state
+   * @param stateFunction partial function describing response to input
+   */
+  final def when(stateName: S)(stateFunction: StateFunction): Unit =
+    when(stateName, null: FiniteDuration)(stateFunction)
+
+  /**
+   * Insert a new StateFunction at the end of the processing chain for the
+   * given state.
+   *
+   * @param stateName designator for the state
+   * @param stateFunctionBuilder partial function builder describing response to input
+   */
+  final def when(stateName: S, stateFunctionBuilder: FSMStateFunctionBuilder[S, D]): Unit =
+    when(stateName, null, stateFunctionBuilder)
+
+  /**
+   * Insert a new StateFunction at the end of the processing chain for the
+   * given state. If the stateTimeout parameter is set, entering this state
+   * without a differing explicit timeout setting will trigger a StateTimeout
+   * event; the same is true when using #stay.
+   *
+   * @param stateName designator for the state
+   * @param stateTimeout default state timeout for this state
+   * @param stateFunctionBuilder partial function builder describing response to input
+   */
+  final def when(stateName: S,
+                 stateTimeout: FiniteDuration,
+                 stateFunctionBuilder: FSMStateFunctionBuilder[S, D]): Unit =
+    when(stateName, stateTimeout)(stateFunctionBuilder.build().asInstanceOf[StateFunction])
+
+  /**
+   * Set initial state. Call this method from the constructor before the [[#initialize]] method.
+   * If different state is needed after a restart this method, followed by [[#initialize]], can
+   * be used in the actor life cycle hooks [[akka.actor.Actor#preStart]] and [[akka.actor.Actor#postRestart]].
+   *
+   * @param stateName initial state designator
+   * @param stateData initial state data
+   */
+  final def startWith(stateName: S, stateData: D): Unit =
+    startWith(stateName, stateData, null: FiniteDuration)
+
+  /**
+   * Set initial state. Call this method from the constructor before the [[#initialize]] method.
+   * If different state is needed after a restart this method, followed by [[#initialize]], can
+   * be used in the actor life cycle hooks [[akka.actor.Actor#preStart]] and [[akka.actor.Actor#postRestart]].
+   *
+   * @param stateName initial state designator
+   * @param stateData initial state data
+   * @param timeout state timeout for the initial state, overriding the default timeout for that state
+   */
+  final def startWith(stateName: S, stateData: D, timeout: FiniteDuration): Unit =
+    if (timeout == null)
+      startWith(stateName, stateData, None)
+    else
+      startWith(stateName, stateData, Some(timeout))
+
+  /**
+   * Add a handler which is called upon each state transition, i.e. not when
+   * staying in the same state.
+   *
+   * <b>Multiple handlers may be installed, and every one of them will be
+   * called, not only the first one matching.</b>
+   */
+  final def onTransition(transitionHandlerBuilder: FSMTransitionHandlerBuilder[S]): Unit =
+    onTransition(transitionHandlerBuilder.build().asInstanceOf[TransitionHandler])
+
+  /**
+   * Set handler which is called upon reception of unhandled messages. Calling
+   * this method again will overwrite the previous contents.
+   *
+   * The current state may be queried using ``stateName``.
+   */
+  final def whenUnhandled(stateFunctionBuilder: FSMStateFunctionBuilder[S, D]): Unit =
+    whenUnhandled(stateFunctionBuilder.build().asInstanceOf[StateFunction])
+
+  /**
+   * Set handler which is called upon termination of this FSM actor. Calling
+   * this method again will overwrite the previous contents.
+   */
+  final def onTermination(stopBuilder: FSMStopBuilder[S, D]): Unit =
+    onTermination(stopBuilder.build().asInstanceOf[PartialFunction[AbstractFSM.this.StopEvent, Unit]])
+
+  // TODO:ban #3770 doc missing
+  // Match creator methods
+  final def matchEvent[ET, DT <: D](eventType: Class[ET], dataType: Class[DT], apply: Apply2[ET, DT, State]): FSMStateFunctionBuilder[S, D] =
+    new FSMStateFunctionBuilder[S, D]().event(eventType, dataType, apply)
+
+  final def matchEvent[DT <: D](eventMatches: JList[AnyRef], dataType: Class[DT], apply: Apply[DT, State]): FSMStateFunctionBuilder[S, D] =
+    new FSMStateFunctionBuilder[S, D]().event(eventMatches, dataType, apply);
+
+  final def matchAnyEvent(apply: Apply2[AnyRef, D, State]): FSMStateFunctionBuilder[S, D] =
+    new FSMStateFunctionBuilder[S, D]().anyEvent(apply)
+
+  final def matchState(fromState: S, toState: S, apply: EmptyUnitApply): FSMTransitionHandlerBuilder[S] =
+    new FSMTransitionHandlerBuilder[S]().state(fromState, toState, apply)
+
+  final def matchStop(reason: Reason, apply: UnitApply2[S, D]): FSMStopBuilder[S, D] =
+    new FSMStopBuilder[S, D]().stop(reason, apply)
+
+  final def matchStop[RT <: Reason](reasonType: Class[RT], apply: UnitApply3[RT, S, D]): FSMStopBuilder[S, D] =
+    new FSMStopBuilder[S, D]().stop(reasonType, apply)
+
+  final def matchStop[RT <: Reason](reasonType: Class[RT], predicate: TypedPredicate[RT], apply: UnitApply3[RT, S, D]): FSMStopBuilder[S, D] =
+    new FSMStopBuilder[S, D]().stop(reasonType, predicate, apply)
+
+  final def matchData[DT <: D](dataType: Class[DT], apply: UnitApply[DT]): UnitMatchBuilder[D] =
+    UnitMatch.builder().`match`(dataType, apply)
+
+  final def matchData[DT <: D](dataType: Class[DT], predicate: TypedPredicate[DT], apply: UnitApply[DT]): UnitMatchBuilder[D] =
+    UnitMatch.builder().`match`(dataType, predicate, apply)
+
+  // goto is a keyword in Java ;)
+  final def goTo(nextStateName: S): State = goto(nextStateName)
+
+  val Normal: FSM.Reason = FSM.Normal
+
+  val Shutdown: FSM.Reason = FSM.Shutdown
+
+  def Failure: Class[_ <: FSM.Reason] = classOf[FSM.Failure]
+
+  val NullFunction: PartialFunction[Any, Nothing] = FSM.NullFunction
+}
