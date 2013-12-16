@@ -161,6 +161,17 @@ object FSM {
       copy(stopReason = Some(reason))
     }
   }
+  /**
+   * All messages sent to the [[akka.actor.FSM]] will be wrapped inside an
+   * `Event`, which allows pattern matching to extract both state and data.
+   */
+  case class Event[D](event: Any, stateData: D) extends NoSerializationVerificationNeeded
+
+  /**
+   * Case class representing the state of the [[akka.actor.FSM]] whithin the
+   * `onTermination` block.
+   */
+  case class StopEvent[S, D](reason: Reason, currentState: S, stateData: D) extends NoSerializationVerificationNeeded
 
 }
 
@@ -248,9 +259,14 @@ trait FSM[S, D] extends Actor with Listeners with ActorLogging {
   import FSM._
 
   type State = FSM.State[S, D]
+  type Event = FSM.Event[D]
+  type StopEvent = FSM.StopEvent[S, D]
   type StateFunction = scala.PartialFunction[Event, State]
   type Timeout = Option[FiniteDuration]
   type TransitionHandler = PartialFunction[(S, S), Unit]
+
+  val Event: FSM.Event.type = FSM.Event
+  val StopEvent: FSM.StopEvent.type = FSM.StopEvent
 
   /*
    * “import” so that these are visible without an import
@@ -664,18 +680,6 @@ trait FSM[S, D] extends Actor with Listeners with ActorLogging {
     case Failure(msg: AnyRef)   ⇒ log.error(msg.toString)
     case _                      ⇒
   }
-
-  /**
-   * All messages sent to the [[akka.actor.FSM]] will be wrapped inside an
-   * `Event`, which allows pattern matching to extract both state and data.
-   */
-  case class Event(event: Any, stateData: D) extends NoSerializationVerificationNeeded
-
-  /**
-   * Case class representing the state of the [[akka.actor.FSM]] whithin the
-   * `onTermination` block.
-   */
-  case class StopEvent(reason: Reason, currentState: S, stateData: D) extends NoSerializationVerificationNeeded
 }
 
 /**
@@ -846,7 +850,7 @@ abstract class AbstractFSM[S, D] extends FSM[S, D] {
    * this method again will overwrite the previous contents.
    */
   final def onTermination(stopBuilder: FSMStopBuilder[S, D]): Unit =
-    onTermination(stopBuilder.build().asInstanceOf[PartialFunction[AbstractFSM.this.StopEvent, Unit]])
+    onTermination(stopBuilder.build().asInstanceOf[PartialFunction[StopEvent, Unit]])
 
   // TODO:ban #3770 doc missing
   // Match creator methods

@@ -12,7 +12,7 @@ import scala.runtime.BoxedUnit;
 
 public class FSMStopBuilder<S, D> {
 
-  private UnitMatchBuilder<FSM<S, D>.StopEvent> builder = UnitMatch.builder();
+  private UnitMatchBuilder<FSM.StopEvent<S, D>> builder = UnitMatch.builder();
 
   public FSMStopBuilder<S, D> stop(final FSM.Reason reason,
                                    final SAM.UnitApply2<S, D> apply) {
@@ -80,7 +80,7 @@ public class FSMStopBuilder<S, D> {
     return this;
   }
 
-  public PartialFunction<FSM<S, D>.StopEvent, BoxedUnit> build() {
+  public PartialFunction<FSM.StopEvent<S, D>, BoxedUnit> build() {
     return builder.build();
   }
 }

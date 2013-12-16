@@ -12,7 +12,7 @@ import java.util.List;
 
 public class FSMStateFunctionBuilder<S, D> {
 
-  private MatchBuilder<FSM<S, D>.Event, FSM.State<S, D>> builder = Match.builder();
+  private MatchBuilder<FSM.Event<D>, FSM.State<S, D>> builder = Match.builder();
 
   public <P, Q> FSMStateFunctionBuilder<S, D> event(final Class<P> eventType,
                                             final Class<Q> dataType,
@@ -46,6 +46,9 @@ public class FSMStateFunctionBuilder<S, D> {
       new SAM.TypedPredicate<FSM.Event>() {
         @Override
         public boolean defined(FSM.Event e) {
+          if (!dataType.isInstance(e.stateData()))
+            return false;
+
           boolean emMatch = false;
           Object event = e.event();
           for (Object em : eventMatches) {
@@ -58,7 +61,7 @@ public class FSMStateFunctionBuilder<S, D> {
             if (emMatch)
               break;
           }
-          return emMatch && dataType.isInstance(e.stateData());
+          return emMatch;
         }
       },
       new SAM.Apply<FSM.Event, FSM.State<S, D>>() {
@@ -86,7 +89,7 @@ public class FSMStateFunctionBuilder<S, D> {
     return this;
   }
 
-  public PartialFunction<FSM<S, D>.Event, FSM.State<S, D>> build() {
+  public PartialFunction<FSM.Event<D>, FSM.State<S, D>> build() {
     return builder.build();
   }
 }
