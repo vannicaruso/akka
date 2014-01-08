@@ -17,6 +17,7 @@ import akka.testkit.ImplicitSender
 import scala.concurrent.duration._
 import akka.actor.FSM
 import akka.actor.ActorRef
+import akka.testkit.TestKitExtension
 import akka.testkit.TestProbe
 import akka.actor.ActorIdentity
 import akka.actor.Identify
@@ -52,6 +53,13 @@ class ReliableProxySpec extends MultiNodeSpec(ReliableProxySpec) with STMultiNod
 
   def sendN(n: Int) = (1 to n) foreach (proxy ! _)
   def expectN(n: Int) = (1 to n) foreach { n ⇒ expectMsg(n); lastSender should equal(target) }
+
+  // avoid too long timeout for expectNoMsg when using dilated timeouts, because
+  // blackhole will trigger failure detection 
+  val expectNoMsgTimeout = {
+    val timeFactor = TestKitExtension(system).TestTimeFactor
+    if (timeFactor > 1.0) (1.0 / timeFactor).seconds else 1.second
+  }
 
   "A ReliableProxy" must {
 
@@ -120,7 +128,7 @@ class ReliableProxySpec extends MultiNodeSpec(ReliableProxySpec) with STMultiNod
         sendN(100)
         within(1 second) {
           expectTransition(Idle, Active)
-          expectNoMsg
+          expectNoMsg(expectNoMsgTimeout)
         }
       }
 
@@ -151,7 +159,7 @@ class ReliableProxySpec extends MultiNodeSpec(ReliableProxySpec) with STMultiNod
         sendN(100)
         within(1 second) {
           expectTransition(Idle, Active)
-          expectNoMsg
+          expectNoMsg(expectNoMsgTimeout)
         }
       }
       runOn(remote) {
@@ -189,7 +197,7 @@ class ReliableProxySpec extends MultiNodeSpec(ReliableProxySpec) with STMultiNod
         within(5 seconds) {
           expectN(50)
         }
-        expectNoMsg(1 second)
+        expectNoMsg(expectNoMsgTimeout)
       }
 
       enterBarrier("test4")
